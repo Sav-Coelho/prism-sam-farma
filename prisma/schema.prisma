@@ -1,0 +1,67 @@
+// prisma/schema.prisma — Prism · Sam Farma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+/// Unidade de negócio (loja / filial). Toda transação pode ser filtrada por unidade.
+model Unit {
+  id           Int           @id @default(autoincrement())
+  name         String        @unique
+  bankAccounts BankAccount[]
+  transactions Transaction[]
+}
+
+/// Conta bancária / caixa de uma unidade.
+model BankAccount {
+  id             Int           @id @default(autoincrement())
+  name           String
+  unitId         Int
+  unit           Unit          @relation(fields: [unitId], references: [id])
+  initialBalance Float         @default(0)
+  transactions   Transaction[]
+}
+
+/// Plano de contas. `dreGroup` define a posição da conta na DRE (ver src/lib/dre.ts).
+/// type: RECEITA | DEDUCAO | CUSTO | DESPESA | IMPOSTO | NEUTRO
+model Account {
+  id           Int           @id @default(autoincrement())
+  code         String        @unique
+  name         String
+  type         String
+  dreGroup     String
+  active       Boolean       @default(true)
+  createdAt    DateTime      @default(now())
+  transactions Transaction[]
+}
+
+/// Lançamento financeiro. Modelo central: alimenta a DRE e o Dashboard.
+/// `amount` negativo = saída/despesa · positivo = entrada/receita.
+/// `month`/`year` = competência contábil (pode diferir de `date`).
+/// `accountId` null = não classificado → fora da DRE.
+model Transaction {
+  id                      Int          @id @default(autoincrement())
+  date                    DateTime
+  description             String
+  amount                  Float
+  memo                    String?
+  fitid                   String?      @unique
+  accountId               Int?
+  account                 Account?     @relation(fields: [accountId], references: [id])
+  unitId                  Int?
+  unit                    Unit?        @relation(fields: [unitId], references: [id])
+  bankAccountId           Int?
+  bankAccount             BankAccount? @relation(fields: [bankAccountId], references: [id])
+  transferToUnitId        Int?
+  transferToBankAccountId Int?
+  month                   Int
+  year                    Int
+  createdAt               DateTime     @default(now())
+
+  @@index([month, year])
+}
