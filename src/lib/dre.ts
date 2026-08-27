@@ -268,3 +268,39 @@ export const MONTH_NAMES = [
   '', 'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
   'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'
 ]
+
+/** Uma linha da DRE com os 12 meses lado a lado, como na planilha do cliente. */
+export interface DRERowAnual {
+  type: DRELineType
+  label: string
+  sublabel?: string
+  indent: number
+  values: number[]   // 12 posições, jan → dez
+  total: number      // ano inteiro
+}
+
+/**
+ * Monta a matriz anual a partir da DRE do ano e das 12 DREs mensais.
+ *
+ * A estrutura vem da DRE anual (que já contém toda conta que apareceu em
+ * qualquer mês) e cada mês só preenche os valores — assim as linhas nunca
+ * saem de ordem nem divergem do cálculo já conferido em `calcDRE`.
+ */
+export function montarMatrizAnual(anual: DREData, meses: DREData[]): DRERowAnual[] {
+  const chave = (l: DRELine) => l.type + '|' + l.indent + '|' + l.label
+
+  const mapas = meses.map(m => {
+    const mapa: Record<string, number> = {}
+    m.lines.forEach(l => { mapa[chave(l)] = l.value })
+    return mapa
+  })
+
+  return anual.lines.map(l => ({
+    type: l.type,
+    label: l.label,
+    sublabel: l.sublabel,
+    indent: l.indent,
+    values: mapas.map(mapa => mapa[chave(l)] ?? 0),
+    total: l.value,
+  }))
+}

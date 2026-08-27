@@ -1,11 +1,17 @@
 import { prisma } from '@/lib/prisma'
-import { calcDRE } from '@/lib/dre'
+import { calcDRE, montarMatrizAnual } from '@/lib/dre'
 import { NextRequest, NextResponse } from 'next/server'
 
 /**
- * GET /api/dre?month=5&year=2026[&unitId=1]
- * month=0 → DRE consolidado do ano inteiro.
- * Retorna { dre, yearData } — yearData tem os 12 meses para os gráficos.
+ * GET /api/dre?year=2026[&month=7][&unitId=1]
+ *
+ * Retorna `{ dre, anual, yearData, matriz }`:
+ *  - `dre`      → DRE do mês pedido (`month=0` = ano inteiro)
+ *  - `anual`    → DRE consolidada do ano
+ *  - `yearData` → as 12 DREs mensais
+ *  - `matriz`   → linhas da DRE com jan…dez lado a lado (a tabela grande)
+ *
+ * Só entra `status = REALIZADO` — a DRE é em regime de caixa.
  */
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
@@ -18,17 +24,8 @@ export async function GET(req: NextRequest) {
   }
 
   const unitFilter = unitId ? { unitId: parseInt(unitId) } : {}
-  const monthFilter = month > 0 ? { month } : {}
 
-  const transactions = await prisma.transaction.findMany({
-    where: { ...monthFilter, year, accountId: { not: null }, status: 'REALIZADO', ...unitFilter },
-    include: { account: true }
-  })
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const dre = calcDRE(transactions as any, month, year)
-
-  // Um único SELECT do ano; o agrupamento por mês é feito em memória
+  // Um único SELECT do ano; o recorte por mês é feito em memória
   const yearTxs = await prisma.transaction.findMany({
     where: { year, accountId: { not: null }, status: 'REALIZADO', ...unitFilter },
     include: { account: true }
@@ -40,5 +37,10 @@ export async function GET(req: NextRequest) {
     return calcDRE(yearTxs.filter(t => t.month === m) as any, m, year)
   })
 
-  return NextResponse.json({ dre, yearData })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const anual = calcDRE(yearTxs as any, 0, year)
+  const dre = month > 0 ? yearData[month - 1] : anual
+  const matriz = montarMatrizAnual(anual, yearData)
+
+  return NextResponse.json({ dre, anual, yearData, matriz })
 }
