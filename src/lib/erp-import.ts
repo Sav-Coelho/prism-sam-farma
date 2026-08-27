@@ -158,7 +158,10 @@ export function parsePagamentos(matrix: string[][], fileName: string): Pagamento
       continue
     }
 
-    const erpKey = String(linha[col.plano] ?? '').trim()
+    // Quando o ERP não traz Plano de Contas, a chave do De-Para é o próprio
+    // credor — é assim que o cliente classifica essas linhas na planilha.
+    const plano = String(linha[col.plano] ?? '').trim()
+    const erpKey = plano || credor
     if (erpKey) erpKeys.push(erpKey)
 
     const unidade = String(linha[col.unidade] ?? '').trim()
