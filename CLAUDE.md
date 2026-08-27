@@ -164,3 +164,22 @@ amarelo `#eaca2d` (`--brave-yellow`), escuro `#2b2d42` (`--brave-dark`).
 Estrutura de DRE, classificador e padrões de UI replicados do sistema **Prism · Tio Chico Shop**
 (`../../Tio Chico Shop/prism-mais-vidas`). Diferenças: aqui o import é de planilhas de contas
 pagas/recebidas (não OFX/PDF de cartão) e o escopo é Dashboard + Lançamentos + DRE.
+
+## Duas regras que não estão escritas nos arquivos
+
+Descobertas conferindo a DRE mês a mês contra a planilha — quebram os números em
+silêncio se forem perdidas:
+
+1. **Credor como chave do De-Para.** O ERP deixa "Plano de Contas" vazio em algumas
+   linhas; nelas a chave é o **nome do credor** (14 das 191 chaves do cliente são
+   fornecedores: SOLLARIS, ORIGO ENERGIA, SURI, TWL NEXCODE, VALIDA PIX...).
+   `parsePagamentos()` faz `erpKey = plano || credor`. Sem isso, jan–jun ficavam com
+   CMV e administrativas menores que a planilha.
+2. **Canal de recebimento canônico.** A base histórica escreve "Recebimento RedeMatriz"
+   e a planilha mensal "Cartão – Rede" para o mesmo canal. `canalCanonico()` normaliza
+   para a grafia da aba "DRE Gerencial"; sem isso a linha de receita se parte no meio
+   do ano e a análise horizontal marca −100%.
+
+Scripts de manutenção em `scripts/`: `conferir.ts` (julho, 13 linhas), `conferir-ano.ts`
+(7 meses × receita/CMV/margem), `religar-credor.ts` e `fundir-canais.ts` (correções
+aplicadas ao que já está gravado), `backfill.ts` (carga inicial).
