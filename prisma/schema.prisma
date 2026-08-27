@@ -15,6 +15,7 @@ model Unit {
   name         String        @unique
   bankAccounts BankAccount[]
   transactions Transaction[]
+  sales        UnitSales[]
 }
 
 /// Conta bancária / caixa de uma unidade.
@@ -69,5 +70,23 @@ model Transaction {
   year                    Int
   createdAt               DateTime     @default(now())
 
+  @@index([month, year])
+}
+
+/// Faturamento e CMV por loja/mês (aba Base_Vendas do arquivo da DRE).
+/// Só serve de base de rateio: os recebimentos chegam consolidados, sem unidade,
+/// então a receita de cada loja é a receita total do mês × participação da loja
+/// no faturamento — a mesma regra da planilha do cliente.
+model UnitSales {
+  id           Int      @id @default(autoincrement())
+  unitId       Int
+  unit         Unit     @relation(fields: [unitId], references: [id])
+  month        Int
+  year         Int
+  faturamento  Float    @default(0)
+  cmv          Float    @default(0)
+  createdAt    DateTime @default(now())
+
+  @@unique([unitId, month, year])
   @@index([month, year])
 }

@@ -88,6 +88,7 @@ export default function DREPage() {
   }, [year, unitId])
 
   const anual = data?.anual
+  const rateio = data?.rateio as { metodo: string; participacao: number[] } | null
   const matriz: DRERowAnual[] = data?.matriz ?? []
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const meses = (data?.yearData ?? []) as any[]
@@ -214,6 +215,24 @@ export default function DREPage() {
               </div>
             ))}
           </div>
+
+          {unitId && rateio && !telaCheia && (
+            <div className="card mb-6" style={{ padding: '12px 20px', background: '#e8f0fe', border: '1px solid #a8c7fa' }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: '#1a5fa8' }}>
+                ℹ Receita de {unitLabel} é rateada
+              </span>
+              <div style={{ fontSize: 12, color: '#1a5fa8', marginTop: 4 }}>
+                Os recebimentos chegam consolidados, sem separação por loja. Custos e despesas
+                abaixo são <strong>reais</strong> desta unidade; a receita é a receita total do mês
+                multiplicada pela participação da loja
+                {rateio.metodo === 'faturamento' && ' no faturamento do mês (aba Base_Vendas)'}
+                {rateio.metodo === 'cmv' && ' no CMV do mês, por não haver faturamento informado'}
+                {rateio.metodo === 'misto' && ' no faturamento do mês, e no CMV nos meses sem faturamento informado'}
+                {rateio.metodo === 'sem-base' && ', mas não há base de rateio para esta unidade — é um centro de custo, aparece só com despesas'}
+                . É a mesma regra da planilha.
+              </div>
+            </div>
+          )}
 
           {foco.aClassificar > 0 && !telaCheia && (
             <div className="card mb-6" style={{ padding: '12px 20px', background: '#fffbea', border: '1px solid #f0c040' }}>

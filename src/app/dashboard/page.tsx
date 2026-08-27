@@ -47,6 +47,7 @@ export default function Dashboard() {
   }, [consolidated, month, year, unitId])
 
   const dre = data?.dre
+  const rateio = data?.rateio as { metodo: string } | null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const yearData = (data?.yearData || []).map((d: any, i: number) => ({
     mes: MONTH_NAMES[i + 1],
@@ -159,6 +160,19 @@ export default function Dashboard() {
         </div>
       ) : (
         <>
+          {unitId && rateio && (
+            <div className="card mb-6" style={{ padding: '12px 20px', background: '#e8f0fe', border: '1px solid #a8c7fa' }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: '#1a5fa8' }}>
+                ℹ Receita de {unitLabel} é rateada
+              </span>
+              <span style={{ fontSize: 12, color: '#1a5fa8', marginLeft: 8 }}>
+                — os recebimentos chegam consolidados, sem loja. Custos e despesas são reais desta
+                unidade; a receita é a do mês × participação da loja
+                {rateio.metodo === 'cmv' ? ' no CMV' : rateio.metodo === 'misto' ? ' no faturamento (CMV nos meses sem faturamento)' : ' no faturamento'}.
+              </span>
+            </div>
+          )}
+
           {/* KPIs principais */}
           <div className="metrics-grid mb-6">
             {[
