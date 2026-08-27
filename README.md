@@ -1,78 +1,78 @@
 # Prism · Sam Farma
 
-Sistema de gestão financeira da Sam Farma: importa as planilhas de contas pagas e recebidas,
-classifica cada lançamento no plano de contas e gera a **DRE** e o **Dashboard** do período.
+Sistema de gestão financeira da Sam Farma (Farma & Farma — Goiana e Igarassu).
+Reproduz a **DRE Gerencial em regime de caixa** que a empresa mantinha em planilha, a partir
+dos arquivos que o ERP já exporta.
 
-Mesma estrutura de DRE do Prism (Tio Chico Shop): margem de contribuição, custos fixos,
-investimentos, não operacionais, impostos e os três pontos de equilíbrio (PEO, PEI, PEF).
+**Produção:** https://prism-sam-farma.vercel.app
+
+## A rotina do analista
+
+1. **Contas a Pagar** — exporta do ERP e sobe em *Lançamentos*. Cada título já vem com a coluna
+   *Plano de Contas*, que é a chave do De-Para: a classificação na DRE é automática.
+   - título **pago** → entra na DRE pela **data de pagamento**
+   - título **pendente** → vai para o **fluxo projetado** pela **data de vencimento**
+2. **Recebidos e Recebíveis** — sobe a planilha de recebimentos por canal.
+   - *recebido* → entra na DRE · *a receber* → alimenta o fluxo projetado
+3. **Conta nova no ERP?** Entra sozinha como `⚠ A Classificar`, fica **fora do resultado** e
+   aparece destacada em *Plano de Contas* para definir a categoria. Nada é classificado errado
+   em silêncio, e nada some da DRE.
+
+Não é preciso mapear colunas nem classificar lançamento a lançamento: o sistema reconhece
+qual é o arquivo pelo próprio cabeçalho.
 
 ## Telas
 
-- **Dashboard** — KPIs (receita bruta/líquida, margem de contribuição, lucro operacional,
-  resultado líquido), custos variáveis e fixos, ponto de equilíbrio, margem de segurança,
-  composição de despesas e evolução mensal. Abre em Consolidado Anual.
-- **Lançamentos** — import de planilha de contas pagas/recebidas com prévia e classificação,
-  lançamento manual e a tabela de lançamentos do mês.
-- **DRE** — demonstração estruturada com coluna AV% (análise vertical), pontos de equilíbrio
-  com e sem impostos, comparativo anual e histórico mensal.
-- **Configuração → Plano de Contas / Unidades** — cadastros que alimentam as três telas acima.
+| Tela | O que traz |
+|---|---|
+| **Dashboard** | KPIs (receita, margem de contribuição, lucro operacional, EBITDA, lucro líquido), composição de despesas, ponto de equilíbrio e evolução mensal |
+| **Lançamentos** | Importação dos dois arquivos, prévia antes de gravar e a tabela do período |
+| **DRE** | A DRE gerencial completa com AV%, memo de CAPEX/A Classificar, comparativo anual e histórico mensal |
+| **Fluxo Projetado** | Entradas e saídas previstas por mês de vencimento, saldo acumulado, vencidos em aberto e maiores compromissos |
+| **Plano de Contas · De-Para** | Cada conta do ERP → categoria da DRE. Filtro "só a classificar" |
+| **Unidades** | Unidades e contas bancárias |
+
+## Estrutura da DRE
+
+```
+(+) FONTES DE RECEITA OPERACIONAL BRUTA     (por canal de recebimento)
+(=) RECEITA OPERACIONAL BRUTA
+(-) Deduções sobre Venda (exceto impostos)
+(=) RECEITA LÍQUIDA
+(-) Custos Variáveis Operacionais (CMV)
+(=) MARGEM DE CONTRIBUIÇÃO / LUCRO BRUTO
+(-) Administrativas  (-) Pessoal  (-) Logísticas  (-) Comerciais
+(=) LUCRO OPERACIONAL
+(-) Impostos
+(=) EBITDA
+(-) Financeiras  (-) Pró-Labore  (-) Despesas de Sócio
+(=) LUCRO LÍQUIDO GERENCIAL
+MEMO (fora do resultado): CAPEX · ⚠ A Classificar · Transferências
+```
+
+Conferido contra a planilha do cliente de julho/2026 — as 13 linhas batem ao centavo.
 
 ## Como rodar
 
 ```bash
 npm install
-```
-
-Crie o `.env` a partir do `.env.example` com as URLs do banco Neon:
-
-```
-DATABASE_URL="postgresql://...-pooler.../neondb?sslmode=require"
-DIRECT_URL="postgresql://.../neondb?sslmode=require"
-```
-
-Aplique o schema e suba o servidor:
-
-```bash
-npm run db:push
 npm run dev
 ```
 
-Abra http://localhost:3000 — a raiz redireciona para `/dashboard`.
+O `.env` precisa de `DATABASE_URL` e `DIRECT_URL` (Neon) — ver `.env.example`.
+Deploy sai de `git push origin main`; o build roda `prisma generate && prisma db push && next build`.
 
-## Primeiros passos no sistema
+## Carga inicial
 
-1. **Unidades** — crie a unidade (ex.: `SAM FARMA`) e a conta bancária/caixa.
-2. **Plano de Contas** — importe o plano (Excel/CSV) ou cadastre as contas manualmente.
-   O botão *Modelo CSV* baixa um exemplo com as colunas aceitas.
-3. **Lançamentos** — envie a planilha de contas pagas e a de contas recebidas. Confira a
-   prévia, classifique as linhas (o classificador sugere com base no histórico) e salve.
-4. **DRE / Dashboard** — o resultado aparece já classificado por grupo.
+O histórico de jan–jul/2026 veio do arquivo `DRE_Gerencial_SamFarma_AtéJulho2026.xlsx`
+(abas `De-Para`, `Base_Pagamentos` e `Base_Recebimentos`) pelo script:
 
-> Lançamentos sem conta do plano **não entram na DRE** — o card "Sem classificação"
-> na tela de Lançamentos mostra quantos ainda faltam.
->
-> Se alguma conta ficar com um Grupo DRE que o sistema não reconhece, o valor **não é
-> descartado em silêncio**: aparece no fim da DRE como "⚠ Contas fora da estrutura da DRE",
-> fora dos totais, para você corrigir o grupo no plano de contas.
+```bash
+npx tsc scripts/backfill.ts src/lib/*.ts --outDir .backfill-out --module commonjs --target es2019 --moduleResolution node --esModuleInterop --skipLibCheck
+node .backfill-out/scripts/backfill.js "<pasta com os xlsx>"
+```
 
-## Importação de planilhas
-
-Aceita `.xlsx`, `.xls` e `.csv`. As colunas de data, descrição e valor são detectadas
-automaticamente (aceita cabeçalho em qualquer linha das 15 primeiras, valores em formato
-brasileiro, parênteses como negativo e datas `DD/MM/AAAA` ou `AAAA-MM-DD`).
-
-Em **Ajustar colunas e sinais** você pode:
-- remapear qualquer coluna, incluindo colunas separadas de débito e crédito;
-- definir o sinal dos valores (tudo saída, tudo entrada, automático ou o sinal da planilha);
-- escolher a competência na DRE: a data de cada linha ou todo o lote no mês selecionado.
-
-Reimportar o mesmo arquivo não duplica nada — cada linha tem uma chave única e as repetidas
-aparecem marcadas como *já importado*.
-
-## Deploy
-
-Vercel. O build roda `prisma generate && prisma db push && next build`, então as duas
-variáveis de ambiente precisam estar configuradas no projeto Vercel.
+Reexecutar é seguro: tudo é gravado com chave única e `skipDuplicates`.
 
 ---
 

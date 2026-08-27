@@ -122,6 +122,20 @@ export default function FluxoProjetado() {
             </div>
           </div>
 
+          {data.totalEntradas < data.totalSaidas * 0.5 && (
+            <div className="card mb-6" style={{ padding: '12px 20px', background: '#e8f0fe', border: '1px solid #a8c7fa' }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: '#1a5fa8' }}>
+                ℹ Projeção com o lado das entradas incompleto
+              </span>
+              <div style={{ fontSize: 12, color: '#1a5fa8', marginTop: 4 }}>
+                Só há {fmt(data.totalEntradas)} de recebíveis lançados contra {fmt(data.totalSaidas)} de contas a pagar.
+                A planilha de recebíveis normalmente traz apenas os cartões a receber — a venda esperada de balcão
+                (PIX, dinheiro, depósito) não entra. Enquanto essa receita prevista não for lançada, use o saldo
+                acumulado abaixo como <strong>calendário de compromissos</strong>, não como previsão de caixa.
+              </div>
+            </div>
+          )}
+
           {primeiroNegativo && (
             <div className="card mb-6" style={{ padding: '12px 20px', background: '#fdecea', border: '1px solid #f5c6c0' }}>
               <span style={{ fontSize: 13, fontWeight: 600, color: '#c0392b' }}>

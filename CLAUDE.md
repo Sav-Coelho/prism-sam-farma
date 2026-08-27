@@ -52,6 +52,9 @@ Array.from(map.entries()).forEach(([k, v]) => { })
 - `fitid` (unique) — chave anti-duplicata gerada no import (`sf_{arquivo}_{data}_{centavos}_{n}`)
 - `month` / `year` — **competência contábil**, pode diferir de `date` (import com "tudo no mês X")
 - `accountId` null = não classificado → **fora da DRE**
+- `status` — REALIZADO (entra na DRE) ou PENDENTE (só fluxo projetado)
+- `dueDate` — vencimento; competência do fluxo projetado
+- `Account.erpKey` (unique) — caminho do "Plano de Contas" no ERP, chave do De-Para
 - `transferToUnitId` / `transferToBankAccountId` — destino da transferência; a contrapartida
   de entrada é criada com `fitid = original + '_entrada'`
 
@@ -60,9 +63,10 @@ Array.from(map.entries()).forEach(([k, v]) => { })
 | Rota | Função |
 |---|---|
 | `/dashboard` | KPIs, composição de despesas, ponto de equilíbrio, evolução anual. Abre em Consolidado Anual (`month=0`) |
-| `/lancamentos` | Import de planilha de contas pagas/recebidas + lançamento manual + tabela do período |
-| `/dre` | DRE estruturada com AV%, três pontos de equilíbrio, comparativo e histórico mensal |
-| `/plano-de-contas` | CRUD do plano de contas + import Excel/CSV |
+| `/lancamentos` | Sobe o Contas a Pagar do ERP e os Recebidos — reconhecimento automático do arquivo |
+| `/dre` | DRE gerencial com AV%, memo, comparativo anual e histórico mensal |
+| `/fluxo-projetado` | Entradas e saídas previstas por mês de vencimento, saldo acumulado, vencidos |
+| `/plano-de-contas` | De-Para: conta do ERP → categoria da DRE, filtro "só a classificar" |
 | `/unidades` | CRUD de unidades e contas bancárias |
 
 ## API
@@ -73,6 +77,7 @@ Array.from(map.entries()).forEach(([k, v]) => { })
 | `GET/POST /api/transactions` | lista do período / lançamento manual |
 | `PUT/DELETE /api/transactions/[id]` | classificar / excluir |
 | `POST /api/import/parse` | multipart → matriz da planilha + colunas detectadas |
+| `GET /api/fluxo?year&unitId` | fluxo projetado: pendentes por mês de vencimento |
 | `POST /api/import/check` | `{ fitids }` → quais já existem no banco |
 | `POST /api/import` | grava o lote (`createMany` + `skipDuplicates`) |
 | `POST /api/classify/suggest` | `{ memos }` → sugestões Jaccard do histórico |
@@ -83,18 +88,24 @@ Array.from(map.entries()).forEach(([k, v]) => { })
 
 ## Fluxo de import (`/lancamentos`)
 
-1. `POST /api/import/parse` — lê xlsx/csv, acha a linha de cabeçalho (varre as 15 primeiras)
-   e mapeia data/descrição/valor/crédito/natureza por sinônimos (`src/lib/spreadsheet.ts`)
-2. O **cliente** converte a matriz em lançamentos com `mapRows()` (`src/lib/import-mapper.ts`) —
-   trocar o mapeamento de colunas recalcula a prévia sem novo upload
-3. `POST /api/import/check` marca as linhas já importadas
-4. `POST /api/classify/suggest` roda o classificador; sugestões aparecem no painel flutuante
-   (aceitar/negar individualmente ou em lote) — nunca são aplicadas automaticamente
-5. `POST /api/import` grava só o que estiver selecionado
+O analista sobe dois arquivos; `POST /api/import/parse` reconhece qual é pelo cabeçalho
+(`sniffKind` em `src/lib/erp-import.ts`):
 
-**Sinal do valor** (`SignMode`): `auto` (coluna de natureza → nome do arquivo → sinal da célula) ·
-`despesa` (tudo −) · `receita` (tudo +) · `arquivo` (respeita a planilha).
-Layout com colunas separadas de débito/crédito: a coluna preenchida define o sinal.
+1. **Contas a Pagar do ERP** (tem coluna "Plano de Contas") — `parsePagamentos()`.
+   Cada título usa a coluna "Valor" (é a que a DRE do cliente soma, **não** "Valor Documento").
+   `Status = Paga` + Data Pagamento → `status REALIZADO`, competência = data de pagamento.
+   Caso contrário → `PENDENTE`, competência = vencimento (só fluxo projetado).
+2. **Recebidos e Recebíveis** — `parseRecebimentos()`. Aceita o formato normalizado
+   (Competência · Canal · Valor) e a matriz em blocos ("Contas a receber Agosto" com colunas
+   recebidos/a receber). Cada bloco tem a janela de colunas limitada pelo bloco seguinte.
+3. Qualquer outra planilha cai no fluxo genérico (`src/lib/import-mapper.ts`, mapeamento manual).
+
+`POST /api/import` grava. `src/lib/erp-sync.ts` resolve os cadastros: chave do ERP → conta
+(criando como `⚠ A Classificar` quando nova), apelido da unidade → `Unit`, canal → conta de receita.
+
+**Datas:** o export do ERP vem em DD/MM/AAAA, mas a aba `Base_Pagamentos` do arquivo da DRE vem
+em **M/D/AA** — o `scripts/backfill.ts` normaliza antes de parsear. Confirmado por 3.412 datas com
+o segundo componente > 12 e pelo total de julho batendo com a planilha.
 
 ## Classificador (`src/lib/classifier.ts`)
 
@@ -108,37 +119,35 @@ Transferências ficam fora do classificador.
 
 ## DRE (`src/lib/dre.ts`)
 
-`calcDRE()` agrupa por `account.dreGroup` e devolve `DRELine[]` plano
-(`section | group | account | subtotal | breakeven | transfer`).
+Modelo do cliente, **regime de caixa** — só entra o que tem `status = REALIZADO`.
 
 ```
-Receita Operacional
-- Deduções sobre a Venda
-= Receita Líquida
-- Custo do Produto/Serviço - Despesa Variável
-= Margem de Contribuição            ← PEO
-- Despesas Administrativas / Financeiras / com Pessoal / com Marketing / Comerciais
-= Lucro Operacional (EBIT)          ← PEI
-- Investimentos
-= Lucro após Investimentos          ← PEF
-+ Receita Não Operacional - Despesas Não Operacionais
-= Lucro antes dos Impostos
-- Impostos
-= Lucro Líquido
+(+) FONTES DE RECEITA OPERACIONAL BRUTA   (uma conta por canal de recebimento)
+(=) RECEITA OPERACIONAL BRUTA
+(-) Deduções sobre Venda (exceto impostos)
+(=) RECEITA LÍQUIDA
+(-) Custos Variáveis Operacionais (CMV)
+(=) MARGEM DE CONTRIBUIÇÃO / LUCRO BRUTO
+(-) Administrativas  (-) Pessoal  (-) Logísticas  (-) Comerciais
+(=) LUCRO OPERACIONAL
+(-) Impostos
+(=) EBITDA
+(-) Financeiras  (-) Pró-Labore  (-) Despesas de Sócio
+(=) LUCRO LÍQUIDO GERENCIAL
+MEMO (nunca soma): CAPEX · ⚠ A Classificar · Transferências · fora da estrutura
 ```
 
-Os grupos válidos de `dreGroup` estão em `DRE_GROUPS` (`src/lib/dre.ts`) — string exata,
-case-sensitive. `Transferência entre Contas` (type `NEUTRO`) é informativo e nunca soma.
+As categorias estão em `CAT` e agrupadas por tipo em `DRE_GROUPS` — a string é exata e igual
+à coluna "Categoria DRE" do De-Para do cliente. Conferido contra a planilha de julho/2026:
+13 linhas batendo ao centavo (`scripts/conferir.ts`).
 
-**Duas proteções contra valor sumido da DRE** (um `dreGroup` com acento ou grafia diferente
-não casa com nenhum grupo e sairia de todos os subtotais sem aviso):
-1. `POST/PUT /api/accounts` rejeitam com 400 qualquer `dreGroup` fora de `ALL_DRE_GROUPS`
-   ou `type` fora de `ACCOUNT_TYPES`.
-2. `calcDRE()` soma o que sobrou em `naoMapeado` e emite as linhas
-   **"⚠ Contas fora da estrutura da DRE"** no fim do relatório — valor visível, fora dos totais.
+Os pontos de equilíbrio (PEO/PEI/PEF) **não** fazem parte do modelo do cliente — ficam num card
+separado na DRE e no Dashboard. Base: custos fixos = admin + pessoal + logística + comercial.
 
-Ao mexer em `DRE_GROUPS`, o import (`src/app/api/accounts/import/route.ts`) resolve sinônimos
-e acentos via `resolveGroup()` — atualizar o `SECTION_MAP` de lá também.
+**Duas proteções contra valor sumido da DRE:**
+1. `POST/PUT /api/accounts` rejeitam com 400 categoria fora de `ALL_DRE_GROUPS`.
+2. `calcDRE()` soma o que sobrou em `naoMapeado` e emite "⚠ Contas fora da estrutura da DRE"
+   no memo — valor visível, fora dos totais. O mesmo vale para `⚠ A Classificar`.
 
 ## UI
 
