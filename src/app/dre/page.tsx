@@ -272,7 +272,8 @@ export default function DREPage() {
                               color: linha.type === 'subtotal' ? valorCor(linha.type, v) : 'var(--brave-gray-mid)',
                               fontWeight: linha.type === 'subtotal' ? 700 : undefined,
                             }}>
-                              {cabecalhoMemo || v === 0 ? '—' : pct(Math.abs(v), baseAV(j))}
+                              {/* o % acompanha o sinal do valor ao lado: prejuízo aparece negativo */}
+                              {cabecalhoMemo || v === 0 ? '—' : pct(v, baseAV(j))}
                             </td>
                           ) : null,
                         ])}
