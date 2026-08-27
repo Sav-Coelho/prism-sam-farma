@@ -1,4 +1,13 @@
-export type DRELineType = 'section' | 'group' | 'account' | 'subtotal' | 'breakeven' | 'transfer'
+/**
+ * DRE Gerencial — Sam Farma (regime de caixa).
+ *
+ * Estrutura replicada da planilha "DRE Gerencial" do cliente: receita por canal
+ * de recebimento, CMV, margem de contribuição, despesas operacionais, lucro
+ * operacional, impostos, EBITDA, financeiras, pró-labore e despesas de sócio,
+ * chegando ao lucro líquido gerencial.
+ */
+
+export type DRELineType = 'section' | 'group' | 'account' | 'subtotal' | 'memo'
 
 export interface DRELine {
   type: DRELineType
@@ -9,6 +18,51 @@ export interface DRELine {
   highlight: boolean
 }
 
+/** Categorias da DRE — string exata, igual à coluna "Categoria DRE" do De-Para. */
+export const CAT = {
+  RECEITA:       'Receita Operacional',
+  DEDUCAO:       'Deduções sobre Venda',
+  CMV:           'Custos Variáveis Operacionais',
+  ADMIN:         'Despesas Administrativas',
+  PESSOAL:       'Despesas com Pessoal',
+  LOGISTICA:     'Despesas Logísticas',
+  COMERCIAL:     'Despesas Comerciais',
+  IMPOSTOS:      'Impostos',
+  FINANCEIRAS:   'Despesas Financeiras',
+  PROLABORE:     'Pró-Labore',
+  SOCIO:         'Despesas de Sócio',
+  INVESTIMENTO:  'Investimento (memo - fora do resultado)',
+  A_CLASSIFICAR: '⚠ A Classificar',
+  TRANSFERENCIA: 'Transferência entre Contas',
+}
+
+/** Categorias agrupadas por tipo — usado nos selects e nos badges. */
+export const DRE_GROUPS: Record<string, string[]> = {
+  RECEITA:  [CAT.RECEITA],
+  DEDUCAO:  [CAT.DEDUCAO],
+  CUSTO:    [CAT.CMV],
+  DESPESA:  [CAT.ADMIN, CAT.PESSOAL, CAT.LOGISTICA, CAT.COMERCIAL, CAT.FINANCEIRAS, CAT.PROLABORE, CAT.SOCIO],
+  IMPOSTO:  [CAT.IMPOSTOS],
+  NEUTRO:   [CAT.INVESTIMENTO, CAT.A_CLASSIFICAR, CAT.TRANSFERENCIA],
+}
+
+export const ACCOUNT_TYPES = ['RECEITA', 'DEDUCAO', 'CUSTO', 'DESPESA', 'IMPOSTO', 'NEUTRO']
+
+export const ALL_DRE_GROUPS: string[] = Object.keys(DRE_GROUPS)
+  .reduce<string[]>((acc, t) => acc.concat(DRE_GROUPS[t]), [])
+
+export const isValidDreGroup = (group: string): boolean =>
+  ALL_DRE_GROUPS.indexOf(group) >= 0
+
+/** Tipo correspondente a uma categoria (uma categoria pertence a um único tipo). */
+export const typeForGroup = (group: string): string =>
+  ACCOUNT_TYPES.find(t => DRE_GROUPS[t].indexOf(group) >= 0) || 'DESPESA'
+
+/** Categorias que ficam fora do resultado (memo). */
+export const MEMO_GROUPS: string[] = [CAT.INVESTIMENTO, CAT.A_CLASSIFICAR, CAT.TRANSFERENCIA]
+
+export const TRANSFER_GROUP: string = CAT.TRANSFERENCIA
+
 export interface DREData {
   month: number
   year: number
@@ -16,51 +70,30 @@ export interface DREData {
   receitaBruta: number
   receitaLiquida: number
   margemContribuicao: number
-  resultadoBruto: number        // alias margemContribuicao
-  resultadoOperacional: number  // lucroOperacional
-  lucroAposInvestimentos: number
-  lucroAntesImpostos: number
-  resultadoLiquido: number
-  // Pontos de equilíbrio (receita mínima) e % da margem de contribuição
-  peo: number                   // Ponto de Equilíbrio Operacional
-  pei: number                   // Ponto de Equilíbrio de Investimentos
-  pef: number                   // Ponto de Equilíbrio Financeiro
-  mcPct: number                 // margem de contribuição / receita operacional
-  custosFixos: number
+  cmv: number
+  despesasOperacionais: number   // admin + pessoal + logística + comercial
+  lucroOperacional: number
+  impostos: number
+  ebitda: number
+  financeiras: number
+  proLabore: number
+  despesasSocio: number
+  lucroLiquido: number
+  // Memo — não integram o resultado
   investimentos: number
-  /** Total classificado em `dreGroup` fora da estrutura — não entra em nenhum subtotal */
+  aClassificar: number
+  transferencias: number
   naoMapeado: number
+  // Ponto de equilíbrio — análise adicional, fora do modelo do cliente
+  mcPct: number
+  peo: number
+  pei: number
+  pef: number
+  custosFixos: number
+  // Nomes mantidos por compatibilidade com as telas
+  resultadoOperacional: number
+  resultadoLiquido: number
 }
-
-/** Grupos válidos de `Account.dreGroup` — exatos, case-sensitive. */
-export const DRE_GROUPS: Record<string, string[]> = {
-  RECEITA: ['Receita Operacional', 'Receita Não Operacional'],
-  DEDUCAO: ['Deduções sobre a Venda'],
-  CUSTO: ['Custo do Produto/Serviço', 'Despesa Variável'],
-  DESPESA: [
-    'Despesas Administrativas',
-    'Despesas Financeiras',
-    'Despesas com Pessoal',
-    'Despesas com Marketing',
-    'Despesas Comerciais',
-    'Investimentos',
-    'Despesas Não Operacionais',
-  ],
-  IMPOSTO: ['Impostos'],
-  NEUTRO: ['Transferência entre Contas'],
-}
-
-export const ACCOUNT_TYPES = ['RECEITA', 'DEDUCAO', 'CUSTO', 'DESPESA', 'IMPOSTO', 'NEUTRO']
-
-/** Conta especial semeada no boot — nunca entra nos totais da DRE. */
-export const TRANSFER_GROUP = 'Transferência entre Contas'
-
-/** Todos os `dreGroup` que a DRE sabe posicionar. */
-export const ALL_DRE_GROUPS: string[] = Object.keys(DRE_GROUPS)
-  .reduce<string[]>((acc, t) => acc.concat(DRE_GROUPS[t]), [])
-
-export const isValidDreGroup = (group: string): boolean =>
-  ALL_DRE_GROUPS.indexOf(group) >= 0
 
 interface AccEntry { name: string; code: string; value: number }
 
@@ -69,20 +102,12 @@ export function calcDRE(
   month: number,
   year: number
 ): DREData {
-  // Agrega por dreGroup e por conta individual
   const byGroup: Record<string, number> = {}
   const byAccount: Record<string, AccEntry[]> = {}
-  let transferSaida = 0
-  let transferEntrada = 0
 
   for (const tx of transactions) {
     if (!tx.account) continue
     const { dreGroup, name, code } = tx.account
-    if (dreGroup === TRANSFER_GROUP) {
-      if (tx.amount < 0) transferSaida += Math.abs(tx.amount)
-      else transferEntrada += tx.amount
-      continue
-    }
     const val = Math.abs(tx.amount)
     byGroup[dreGroup] = (byGroup[dreGroup] || 0) + val
     if (!byAccount[dreGroup]) byAccount[dreGroup] = []
@@ -92,10 +117,11 @@ export function calcDRE(
 
   const g = (group: string) => byGroup[group] || 0
 
-  const accts = (group: string, positive: boolean, indent: number): DRELine[] =>
+  /** Linhas de detalhe de uma categoria, da maior para a menor. */
+  const detalhe = (group: string, positive: boolean, indent: number): DRELine[] =>
     (byAccount[group] || [])
       .filter(a => a.value > 0)
-      .sort((a, b) => a.code.localeCompare(b.code))
+      .sort((a, b) => b.value - a.value)
       .map(a => ({
         type: 'account' as const,
         label: a.name,
@@ -104,147 +130,137 @@ export function calcDRE(
         highlight: false,
       }))
 
-  // Totais intermediários
-  const receitaOp    = g('Receita Operacional')
-  const deducoes     = g('Deduções sobre a Venda')
-  const receitaLiq   = receitaOp - deducoes
+  const receitaBruta = g(CAT.RECEITA)
+  const deducoes     = g(CAT.DEDUCAO)
+  const receitaLiq   = receitaBruta - deducoes
 
-  const custoProd    = g('Custo do Produto/Serviço')
-  const despVar      = g('Despesa Variável')
-  const custosVar    = custoProd + despVar
-  const margem       = receitaLiq - custosVar
+  const cmv          = g(CAT.CMV)
+  const margem       = receitaLiq - cmv
 
-  const despAdmin    = g('Despesas Administrativas')
-  const despFin      = g('Despesas Financeiras')
-  const despPessoal  = g('Despesas com Pessoal')
-  const despMkt      = g('Despesas com Marketing')
-  const despCom      = g('Despesas Comerciais')
-  const custosFixos  = despAdmin + despFin + despPessoal + despMkt + despCom
-  const lucroOp      = margem - custosFixos
+  const admin        = g(CAT.ADMIN)
+  const pessoal      = g(CAT.PESSOAL)
+  const logistica    = g(CAT.LOGISTICA)
+  const comercial    = g(CAT.COMERCIAL)
+  const despOp       = admin + pessoal + logistica + comercial
+  const lucroOp      = margem - despOp
 
-  const invest       = g('Investimentos')
-  const lucroAposInv = lucroOp - invest
+  const impostos     = g(CAT.IMPOSTOS)
+  const ebitda       = lucroOp - impostos
 
-  const recNaoOp     = g('Receita Não Operacional')
-  const despNaoOp    = g('Despesas Não Operacionais')
-  const lucroAntesIR = lucroAposInv + recNaoOp - despNaoOp
+  const financeiras  = g(CAT.FINANCEIRAS)
+  const proLabore    = g(CAT.PROLABORE)
+  const socio        = g(CAT.SOCIO)
+  const lucroLiquido = ebitda - financeiras - proLabore - socio
 
-  const impostos     = g('Impostos')
-  const lucroLiq     = lucroAntesIR - impostos
+  const investimentos  = g(CAT.INVESTIMENTO)
+  const aClassificar   = g(CAT.A_CLASSIFICAR)
+  const transferencias = g(CAT.TRANSFERENCIA)
 
-  // Contas cujo dreGroup não existe na estrutura (typo na importação, acento diferente).
-  // Não somam em nada — mas precisam aparecer, senão o valor desaparece sem aviso.
+  // Contas com categoria fora da estrutura — nunca somam, mas precisam aparecer
   const naoMapeados = Object.keys(byGroup).filter(k => !isValidDreGroup(k))
   const naoMapeado = naoMapeados.reduce((s, k) => s + byGroup[k], 0)
 
-  // Pontos de equilíbrio (contábil)
-  const mcPct = receitaOp > 0 ? margem / receitaOp : 0
-  const peo   = mcPct > 0 ? custosFixos / mcPct : 0
-  const pei   = mcPct > 0 ? (custosFixos + invest) / mcPct : 0
-  const pef   = mcPct > 0 ? (custosFixos + invest + Math.max(0, despNaoOp - recNaoOp)) / mcPct : 0
+  // Ponto de equilíbrio (análise adicional, fora do modelo do cliente)
+  const mcPct = receitaBruta > 0 ? margem / receitaBruta : 0
+  const peo = mcPct > 0 ? despOp / mcPct : 0
+  const pei = mcPct > 0 ? (despOp + impostos + financeiras) / mcPct : 0
+  const pef = mcPct > 0 ? (despOp + impostos + financeiras + proLabore + socio + investimentos) / mcPct : 0
 
-  const lines: DRELine[] = [
-    // ── RECEITAS ──────────────────────────────────────────
-    { type: 'group', label: 'Receita Operacional', value: receitaOp, indent: 0, highlight: false },
-    ...accts('Receita Operacional', true, 1),
-
-    { type: 'group', label: 'Deduções sobre a Venda', sublabel: '(-) impostos, taxas e tarifas', value: -deducoes, indent: 0, highlight: false },
-    ...accts('Deduções sobre a Venda', false, 1),
-
-    { type: 'subtotal', label: '(=) Receita Líquida de Vendas', value: receitaLiq, indent: 0, highlight: true },
-
-    // ── CUSTOS VARIÁVEIS ──────────────────────────────────
-    { type: 'section', label: '(-) Custos Variáveis', value: -custosVar, indent: 0, highlight: false },
-
-    { type: 'group', label: 'Custo do Produto/Serviço', value: -custoProd, indent: 1, highlight: false },
-    ...accts('Custo do Produto/Serviço', false, 2),
-
-    { type: 'group', label: 'Despesa Variável', value: -despVar, indent: 1, highlight: false },
-    ...accts('Despesa Variável', false, 2),
-
-    { type: 'subtotal', label: '(=) Margem de Contribuição', value: margem, indent: 0, highlight: true },
-    ...(peo > 0 ? [{ type: 'breakeven' as const, label: '(=) Ponto de Equilíbrio Operacional', sublabel: 'receita mínima para cobrir custos fixos', value: peo, indent: 0, highlight: false }] : []),
-
-    // ── CUSTOS FIXOS ──────────────────────────────────────
-    { type: 'section', label: '(-) Custos Fixos', value: -custosFixos, indent: 0, highlight: false },
-
-    { type: 'group', label: 'Despesas Administrativas', value: -despAdmin, indent: 1, highlight: false },
-    ...accts('Despesas Administrativas', false, 2),
-
-    { type: 'group', label: 'Despesas Financeiras', value: -despFin, indent: 1, highlight: false },
-    ...accts('Despesas Financeiras', false, 2),
-
-    { type: 'group', label: 'Despesas com Pessoal', value: -despPessoal, indent: 1, highlight: false },
-    ...accts('Despesas com Pessoal', false, 2),
-
-    { type: 'group', label: 'Despesas com Marketing', value: -despMkt, indent: 1, highlight: false },
-    ...accts('Despesas com Marketing', false, 2),
-
-    { type: 'group', label: 'Despesas Comerciais', value: -despCom, indent: 1, highlight: false },
-    ...accts('Despesas Comerciais', false, 2),
-
-    { type: 'subtotal', label: '(=) Lucro Operacional', sublabel: 'EBIT', value: lucroOp, indent: 0, highlight: true },
-    ...(pei > 0 ? [{ type: 'breakeven' as const, label: '(=) Ponto de Equilíbrio de Investimentos', value: pei, indent: 0, highlight: false }] : []),
-
-    // ── INVESTIMENTOS ─────────────────────────────────────
-    { type: 'section', label: '(-) Investimentos', value: -invest, indent: 0, highlight: false },
-    { type: 'group', label: 'Investimento em Desenv. Empresarial', value: -invest, indent: 1, highlight: false },
-    ...accts('Investimentos', false, 2),
-
-    { type: 'subtotal', label: '(=) Lucro após os Investimentos', value: lucroAposInv, indent: 0, highlight: true },
-    ...(pef > 0 ? [{ type: 'breakeven' as const, label: '(=) Ponto de Equilíbrio Financeiro', value: pef, indent: 0, highlight: false }] : []),
-
-    // ── NÃO OPERACIONAIS ──────────────────────────────────
-    { type: 'section', label: '(+/-) Outras Receitas e Despesas Não Operacionais', value: recNaoOp - despNaoOp, indent: 0, highlight: false },
-
-    { type: 'group', label: 'Receita Não Operacional', value: recNaoOp, indent: 1, highlight: false },
-    ...accts('Receita Não Operacional', true, 2),
-
-    { type: 'group', label: 'Despesas Não Operacionais', value: -despNaoOp, indent: 1, highlight: false },
-    ...accts('Despesas Não Operacionais', false, 2),
-
-    { type: 'subtotal', label: '(=) Lucro antes dos Impostos', value: lucroAntesIR, indent: 0, highlight: true },
-
-    // ── IMPOSTOS ──────────────────────────────────────────
-    { type: 'group', label: 'Impostos', value: -impostos, indent: 0, highlight: false },
-    ...accts('Impostos', false, 1),
-
-    { type: 'subtotal', label: '(=) Lucro Líquido', value: lucroLiq, indent: 0, highlight: true },
-
-    // Alerta — grupo desconhecido, valor fora de todos os subtotais acima
-    ...(naoMapeado > 0 ? [
-      { type: 'transfer' as const, label: '⚠ Contas fora da estrutura da DRE', sublabel: `grupo não reconhecido: ${naoMapeados.join(' · ')} — corrija o Grupo DRE no plano de contas`, value: 0, indent: 0, highlight: false },
-      ...naoMapeados.map(k => ({
-        type: 'transfer' as const,
-        label: k,
-        value: byGroup[k],
+  const memoLines: DRELine[] = []
+  if (investimentos > 0 || aClassificar > 0 || transferencias > 0 || naoMapeado > 0) {
+    memoLines.push({ type: 'memo', label: 'MEMO — não integra o resultado gerencial', value: 0, indent: 0, highlight: false })
+    if (investimentos > 0) {
+      memoLines.push({ type: 'memo', label: 'Investimentos / Imobilizado (CAPEX)', value: -investimentos, indent: 1, highlight: false })
+    }
+    if (aClassificar > 0) {
+      memoLines.push({ type: 'memo', label: '⚠ A Classificar', sublabel: 'revisar o De-Para no Plano de Contas', value: -aClassificar, indent: 1, highlight: false })
+    }
+    if (transferencias > 0) {
+      memoLines.push({ type: 'memo', label: 'Transferências entre Contas', value: -transferencias, indent: 1, highlight: false })
+    }
+    if (naoMapeado > 0) {
+      memoLines.push({
+        type: 'memo',
+        label: '⚠ Contas fora da estrutura da DRE',
+        sublabel: 'categoria não reconhecida: ' + naoMapeados.join(' · '),
+        value: -naoMapeado,
         indent: 1,
         highlight: false,
-      })),
-    ] : []),
+      })
+    }
+  }
 
-    // Informativo — transferências não afetam nenhum total
-    ...(transferSaida > 0 || transferEntrada > 0 ? [
-      { type: 'transfer' as const, label: 'Transferências entre Contas', sublabel: 'informativo — não contabiliza no resultado', value: 0, indent: 0, highlight: false },
-      ...(transferSaida > 0 ? [{ type: 'transfer' as const, label: 'Saídas de Transferência', value: -transferSaida, indent: 1, highlight: false }] : []),
-      ...(transferEntrada > 0 ? [{ type: 'transfer' as const, label: 'Entradas de Transferência', value: transferEntrada, indent: 1, highlight: false }] : []),
-    ] : []),
+  const lines: DRELine[] = [
+    { type: 'section', label: '(+) FONTES DE RECEITA OPERACIONAL BRUTA', value: receitaBruta, indent: 0, highlight: false },
+    ...detalhe(CAT.RECEITA, true, 1),
+
+    { type: 'subtotal', label: '(=) RECEITA OPERACIONAL BRUTA', value: receitaBruta, indent: 0, highlight: true },
+
+    { type: 'group', label: '(-) Deduções sobre Venda', sublabel: 'exceto impostos', value: -deducoes, indent: 0, highlight: false },
+    ...detalhe(CAT.DEDUCAO, false, 1),
+
+    { type: 'subtotal', label: '(=) RECEITA LÍQUIDA', value: receitaLiq, indent: 0, highlight: true },
+
+    { type: 'group', label: '(-) Custos Variáveis Operacionais', sublabel: 'CMV', value: -cmv, indent: 0, highlight: false },
+    ...detalhe(CAT.CMV, false, 1),
+
+    { type: 'subtotal', label: '(=) MARGEM DE CONTRIBUIÇÃO / LUCRO BRUTO', value: margem, indent: 0, highlight: true },
+
+    { type: 'group', label: '(-) Despesas Administrativas', value: -admin, indent: 0, highlight: false },
+    ...detalhe(CAT.ADMIN, false, 1),
+
+    { type: 'group', label: '(-) Despesas com Pessoal', value: -pessoal, indent: 0, highlight: false },
+    ...detalhe(CAT.PESSOAL, false, 1),
+
+    { type: 'group', label: '(-) Despesas Logísticas', value: -logistica, indent: 0, highlight: false },
+    ...detalhe(CAT.LOGISTICA, false, 1),
+
+    { type: 'group', label: '(-) Despesas Comerciais', value: -comercial, indent: 0, highlight: false },
+    ...detalhe(CAT.COMERCIAL, false, 1),
+
+    { type: 'subtotal', label: '(=) LUCRO OPERACIONAL', value: lucroOp, indent: 0, highlight: true },
+
+    { type: 'group', label: '(-) Impostos', value: -impostos, indent: 0, highlight: false },
+    ...detalhe(CAT.IMPOSTOS, false, 1),
+
+    { type: 'subtotal', label: '(=) EBITDA', value: ebitda, indent: 0, highlight: true },
+
+    { type: 'group', label: '(-) Despesas Financeiras', value: -financeiras, indent: 0, highlight: false },
+    ...detalhe(CAT.FINANCEIRAS, false, 1),
+
+    { type: 'group', label: '(-) Pró-Labore', value: -proLabore, indent: 0, highlight: false },
+    ...detalhe(CAT.PROLABORE, false, 1),
+
+    { type: 'group', label: '(-) Despesas de Sócio', value: -socio, indent: 0, highlight: false },
+    ...detalhe(CAT.SOCIO, false, 1),
+
+    { type: 'subtotal', label: '(=) LUCRO LÍQUIDO GERENCIAL', value: lucroLiquido, indent: 0, highlight: true },
+
+    ...memoLines,
   ]
 
   return {
     month, year, lines,
-    receitaBruta: receitaOp,
+    receitaBruta,
     receitaLiquida: receitaLiq,
     margemContribuicao: margem,
-    resultadoBruto: margem,
-    resultadoOperacional: lucroOp,
-    lucroAposInvestimentos: lucroAposInv,
-    lucroAntesImpostos: lucroAntesIR,
-    resultadoLiquido: lucroLiq,
-    peo, pei, pef, mcPct,
-    custosFixos,
-    investimentos: invest,
+    cmv,
+    despesasOperacionais: despOp,
+    lucroOperacional: lucroOp,
+    impostos,
+    ebitda,
+    financeiras,
+    proLabore,
+    despesasSocio: socio,
+    lucroLiquido,
+    investimentos,
+    aClassificar,
+    transferencias,
     naoMapeado,
+    mcPct, peo, pei, pef,
+    custosFixos: despOp,
+    resultadoOperacional: lucroOp,
+    resultadoLiquido: lucroLiquido,
   }
 }
 

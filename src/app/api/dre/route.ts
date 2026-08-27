@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
   const monthFilter = month > 0 ? { month } : {}
 
   const transactions = await prisma.transaction.findMany({
-    where: { ...monthFilter, year, accountId: { not: null }, ...unitFilter },
+    where: { ...monthFilter, year, accountId: { not: null }, status: 'REALIZADO', ...unitFilter },
     include: { account: true }
   })
 
@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
 
   // Um único SELECT do ano; o agrupamento por mês é feito em memória
   const yearTxs = await prisma.transaction.findMany({
-    where: { year, accountId: { not: null }, ...unitFilter },
+    where: { year, accountId: { not: null }, status: 'REALIZADO', ...unitFilter },
     include: { account: true }
   })
 

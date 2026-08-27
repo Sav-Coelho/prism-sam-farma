@@ -1,7 +1,7 @@
 import { prisma } from '@/lib/prisma'
 import { NextRequest, NextResponse } from 'next/server'
 import { readSheetMatrix, findCol } from '@/lib/spreadsheet'
-import { DRE_GROUPS, TRANSFER_GROUP } from '@/lib/dre'
+import { CAT, DRE_GROUPS } from '@/lib/dre'
 
 export const runtime = 'nodejs'
 
@@ -9,48 +9,41 @@ interface SectionInfo { type: string; dreGroup: string }
 
 /** Cabeçalhos de seção aceitos (formato "modelo de DRE" em coluna única). */
 const SECTION_MAP: Record<string, SectionInfo> = {
-  'receita operacional':                  { type: 'RECEITA',  dreGroup: 'Receita Operacional' },
-  'receitas operacionais':               { type: 'RECEITA',  dreGroup: 'Receita Operacional' },
-  'deduções sobre a venda':              { type: 'DEDUCAO',  dreGroup: 'Deduções sobre a Venda' },
-  'deducoes sobre a venda':              { type: 'DEDUCAO',  dreGroup: 'Deduções sobre a Venda' },
-  'deduções sobre vendas':               { type: 'DEDUCAO',  dreGroup: 'Deduções sobre a Venda' },
-  'custo do produto/serviço':            { type: 'CUSTO',    dreGroup: 'Custo do Produto/Serviço' },
-  'custo do produto/servico':            { type: 'CUSTO',    dreGroup: 'Custo do Produto/Serviço' },
-  'cmv':                                 { type: 'CUSTO',    dreGroup: 'Custo do Produto/Serviço' },
-  'despesa variável':                    { type: 'CUSTO',    dreGroup: 'Despesa Variável' },
-  'despesa variavel':                    { type: 'CUSTO',    dreGroup: 'Despesa Variável' },
-  'despesas variáveis':                  { type: 'CUSTO',    dreGroup: 'Despesa Variável' },
-  'despesas administrativas':            { type: 'DESPESA',  dreGroup: 'Despesas Administrativas' },
-  'despesas financeiras':                { type: 'DESPESA',  dreGroup: 'Despesas Financeiras' },
-  'despesas com pessoal':                { type: 'DESPESA',  dreGroup: 'Despesas com Pessoal' },
-  'despesas com marketing':              { type: 'DESPESA',  dreGroup: 'Despesas com Marketing' },
-  'despesas comerciais':                 { type: 'DESPESA',  dreGroup: 'Despesas Comerciais' },
-  'investimentos':                       { type: 'DESPESA',  dreGroup: 'Investimentos' },
-  'investimento em desenv. empresarial': { type: 'DESPESA',  dreGroup: 'Investimentos' },
-  'receita não operacional':             { type: 'RECEITA',  dreGroup: 'Receita Não Operacional' },
-  'receita nao operacional':             { type: 'RECEITA',  dreGroup: 'Receita Não Operacional' },
-  'despesas não operacionais':           { type: 'DESPESA',  dreGroup: 'Despesas Não Operacionais' },
-  'despesas nao operacionais':           { type: 'DESPESA',  dreGroup: 'Despesas Não Operacionais' },
-  'impostos':                            { type: 'IMPOSTO',  dreGroup: 'Impostos' },
-  'transferência entre contas':          { type: 'NEUTRO',   dreGroup: TRANSFER_GROUP },
+  'receita operacional':        { type: 'RECEITA', dreGroup: CAT.RECEITA },
+  'fontes de receita':          { type: 'RECEITA', dreGroup: CAT.RECEITA },
+  'deduções sobre venda':       { type: 'DEDUCAO', dreGroup: CAT.DEDUCAO },
+  'deduções sobre a venda':     { type: 'DEDUCAO', dreGroup: CAT.DEDUCAO },
+  'custos variáveis operacionais': { type: 'CUSTO', dreGroup: CAT.CMV },
+  'custos variáveis':           { type: 'CUSTO', dreGroup: CAT.CMV },
+  'cmv':                        { type: 'CUSTO', dreGroup: CAT.CMV },
+  'despesas administrativas':   { type: 'DESPESA', dreGroup: CAT.ADMIN },
+  'despesas com pessoal':       { type: 'DESPESA', dreGroup: CAT.PESSOAL },
+  'despesas logísticas':        { type: 'DESPESA', dreGroup: CAT.LOGISTICA },
+  'despesas comerciais':        { type: 'DESPESA', dreGroup: CAT.COMERCIAL },
+  'impostos':                   { type: 'IMPOSTO', dreGroup: CAT.IMPOSTOS },
+  'despesas financeiras':       { type: 'DESPESA', dreGroup: CAT.FINANCEIRAS },
+  'pró-labore':                 { type: 'DESPESA', dreGroup: CAT.PROLABORE },
+  'despesas de sócio':          { type: 'DESPESA', dreGroup: CAT.SOCIO },
+  'investimento':               { type: 'NEUTRO', dreGroup: CAT.INVESTIMENTO },
+  'transferência entre contas': { type: 'NEUTRO', dreGroup: CAT.TRANSFERENCIA },
 }
 
 /** Prefixo de código gerado automaticamente por grupo. */
 const GROUP_PREFIX: Record<string, string> = {
-  'Receita Operacional':       '3.1',
-  'Deduções sobre a Venda':    '3.2',
-  'Custo do Produto/Serviço':  '4.1',
-  'Despesa Variável':          '4.2',
-  'Despesas Administrativas':  '5.1',
-  'Despesas Financeiras':      '5.2',
-  'Despesas com Pessoal':      '5.3',
-  'Despesas com Marketing':    '5.4',
-  'Despesas Comerciais':       '5.5',
-  'Investimentos':             '6.1',
-  'Receita Não Operacional':   '7.1',
-  'Despesas Não Operacionais': '7.2',
-  'Impostos':                  '8.1',
-  [TRANSFER_GROUP]:            '9.9',
+  [CAT.RECEITA]: '1.1',
+  [CAT.DEDUCAO]: '1.2',
+  [CAT.CMV]: '2.1',
+  [CAT.ADMIN]: '3.1',
+  [CAT.PESSOAL]: '3.2',
+  [CAT.LOGISTICA]: '3.3',
+  [CAT.COMERCIAL]: '3.4',
+  [CAT.IMPOSTOS]: '4.1',
+  [CAT.FINANCEIRAS]: '5.1',
+  [CAT.PROLABORE]: '5.2',
+  [CAT.SOCIO]: '5.3',
+  [CAT.INVESTIMENTO]: '6.1',
+  [CAT.A_CLASSIFICAR]: '9.1',
+  [CAT.TRANSFERENCIA]: '9.9',
 }
 
 /** Linhas de totalização / estrutura — não são contas. */

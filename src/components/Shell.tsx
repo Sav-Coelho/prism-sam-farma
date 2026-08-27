@@ -5,6 +5,7 @@ const NAV = [
   { href: '/dashboard', icon: '◈', label: 'Dashboard' },
   { href: '/lancamentos', icon: '↑↓', label: 'Lançamentos' },
   { href: '/dre', icon: '▦', label: 'DRE' },
+  { href: '/fluxo-projetado', icon: '📅', label: 'Fluxo Projetado' },
 ]
 
 const NAV_CONFIG = [

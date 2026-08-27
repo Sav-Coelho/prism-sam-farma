@@ -26,17 +26,14 @@ function lineStyle(type: DRELineType, indent: number) {
   if (type === 'section') {
     return { ...base, padding: '8px 14px', paddingLeft: pad, marginTop: 10, borderTop: '1px solid rgba(43,45,66,0.06)' }
   }
-  if (type === 'breakeven') {
-    return { ...base, padding: '5px 14px', paddingLeft: pad, background: 'rgba(234,202,45,0.07)', borderRadius: 6 }
+  if (type === 'memo' && indent === 0) {
+    return { ...base, padding: '8px 14px', paddingLeft: pad, marginTop: 16, borderTop: '2px dashed rgba(43,45,66,0.14)' }
   }
-  if (type === 'transfer' && indent === 0) {
-    return { ...base, padding: '8px 14px', paddingLeft: pad, marginTop: 14, borderTop: '2px dashed rgba(43,45,66,0.14)' }
-  }
-  if (type === 'transfer') {
+  if (type === 'memo') {
     return { ...base, padding: '5px 14px', paddingLeft: pad }
   }
   if (type === 'group') {
-    return { ...base, padding: indent === 0 ? '8px 14px' : '6px 14px', paddingLeft: pad }
+    return { ...base, padding: '8px 14px', paddingLeft: pad, marginTop: 6 }
   }
   return { ...base, padding: '4px 14px', paddingLeft: pad }
 }
@@ -44,11 +41,9 @@ function lineStyle(type: DRELineType, indent: number) {
 function labelStyle(type: DRELineType, indent: number) {
   if (type === 'subtotal') return { fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-sub)' }
   if (type === 'section') return { fontSize: 12, fontWeight: 700, color: 'var(--brave-gray)', fontFamily: 'var(--font-sub)', textTransform: 'uppercase' as const, letterSpacing: '0.04em' }
-  if (type === 'breakeven') return { fontSize: 11, fontWeight: 500, color: '#856404' }
-  if (type === 'transfer' && indent === 0) return { fontSize: 12, fontWeight: 700, color: '#546e7a', fontFamily: 'var(--font-sub)', textTransform: 'uppercase' as const, letterSpacing: '0.04em' }
-  if (type === 'transfer') return { fontSize: 12, fontWeight: 500, color: '#78909c' }
-  if (type === 'group' && indent === 0) return { fontSize: 13, fontWeight: 600, fontFamily: 'var(--font-sub)' }
-  if (type === 'group') return { fontSize: 12, fontWeight: 600 }
+  if (type === 'memo' && indent === 0) return { fontSize: 11, fontWeight: 700, color: '#546e7a', fontFamily: 'var(--font-sub)', textTransform: 'uppercase' as const, letterSpacing: '0.04em' }
+  if (type === 'memo') return { fontSize: 12, fontWeight: 500, color: '#78909c' }
+  if (type === 'group') return { fontSize: 13, fontWeight: 600, fontFamily: 'var(--font-sub)' }
   return { fontSize: 12, color: 'var(--brave-gray)' }
 }
 
@@ -59,8 +54,7 @@ function valueStyle(type: DRELineType, value: number) {
   const base = { color, whiteSpace: 'nowrap' as const }
   if (type === 'subtotal') return { ...base, fontSize: 14, fontWeight: 700 }
   if (type === 'section') return { ...base, fontSize: 12, fontWeight: 600, color: 'var(--brave-gray)' }
-  if (type === 'breakeven') return { ...base, fontSize: 11, color: '#856404' }
-  if (type === 'transfer') return { ...base, fontSize: 12, color: '#78909c' }
+  if (type === 'memo') return { ...base, fontSize: 12, color: '#78909c' }
   if (type === 'group') return { ...base, fontSize: 13, fontWeight: 600 }
   return { ...base, fontSize: 12 }
 }
@@ -74,8 +68,6 @@ export default function DREPage() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
-  // Incluir ou não os impostos nos pontos de equilíbrio
-  const [comImpostos, setComImpostos] = useState(false)
 
   useEffect(() => {
     fetch('/api/units').then(r => r.json()).then(setUnits).catch(() => {})
@@ -96,27 +88,17 @@ export default function DREPage() {
     mes: MONTH_NAMES[i + 1],
     'Receita Bruta': +d.receitaBruta.toFixed(2),
     'Margem Contrib.': +d.margemContribuicao.toFixed(2),
-    'Lucro Líquido': +d.resultadoLiquido.toFixed(2),
+    'Lucro Líquido': +d.lucroLiquido.toFixed(2),
   }))
 
   const unitLabel = unitId ? units.find(u => u.id === parseInt(unitId))?.name : 'Consolidado'
-
-  // Impostos do mês (grupo da DRE). São um desembolso conhecido do período →
-  // entram no numerador do ponto de equilíbrio quando o modo "com impostos" está ligado.
-  const impostosMes = (() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const l = ((dre?.lines || []) as any[]).find(x => x.label === 'Impostos' && x.type === 'group')
-    return l ? Math.abs(l.value) : 0
-  })()
-  const deltaImp = comImpostos && dre?.mcPct > 0 ? impostosMes / dre.mcPct : 0
-  const impostosPct = dre?.receitaBruta > 0 ? impostosMes / dre.receitaBruta : 0
 
   return (
     <Shell>
       <div className="page-header flex-between">
         <div>
-          <h1 className="page-title">DRE — {unitLabel}</h1>
-          <p className="page-subtitle">Demonstração do Resultado do Exercício</p>
+          <h1 className="page-title">DRE Gerencial — {unitLabel}</h1>
+          <p className="page-subtitle">Demonstração do resultado em regime de caixa</p>
         </div>
         <div className="flex gap-2">
           <select className="form-select" style={{ width: 160 }} value={unitId} onChange={e => setUnitId(e.target.value)}>
@@ -143,7 +125,7 @@ export default function DREPage() {
             Sem dados para {MONTH_NAMES[month]}/{year} — {unitLabel}
           </div>
           <div style={{ color: 'var(--brave-gray)', fontSize: 13, marginTop: 6 }}>
-            Importe e classifique lançamentos para gerar a DRE
+            Importe as contas pagas e os recebimentos do período em Lançamentos
           </div>
         </div>
       ) : (
@@ -151,11 +133,11 @@ export default function DREPage() {
           {/* KPIs */}
           <div className="metrics-grid mb-6">
             {[
-              { label: 'Receita Operacional', value: dre.receitaBruta },
-              { label: 'Receita Líquida', value: dre.receitaLiquida, sub: pct(dre.receitaLiquida, dre.receitaBruta) },
+              { label: 'Receita Bruta', value: dre.receitaBruta },
               { label: 'Margem de Contribuição', value: dre.margemContribuicao, sub: pct(dre.margemContribuicao, dre.receitaBruta) },
-              { label: 'Lucro Operacional', value: dre.resultadoOperacional, sub: pct(dre.resultadoOperacional, dre.receitaBruta) },
-              { label: 'Lucro Líquido', value: dre.resultadoLiquido, sub: pct(dre.resultadoLiquido, dre.receitaBruta) },
+              { label: 'Lucro Operacional', value: dre.lucroOperacional, sub: pct(dre.lucroOperacional, dre.receitaBruta) },
+              { label: 'EBITDA', value: dre.ebitda, sub: pct(dre.ebitda, dre.receitaBruta) },
+              { label: 'Lucro Líquido Gerencial', value: dre.lucroLiquido, sub: pct(dre.lucroLiquido, dre.receitaBruta) },
             ].map(m => (
               <div className="metric-card" key={m.label}>
                 <div className="metric-accent" style={{ background: m.value < 0 ? '#c0392b' : 'var(--brave-yellow)' }} />
@@ -166,67 +148,58 @@ export default function DREPage() {
             ))}
           </div>
 
-          {/* Pontos de Equilíbrio */}
-          <div className="card mb-6">
-            <div className="flex-between" style={{ alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
-              <div>
-                <div style={{ fontFamily: 'var(--font-sub)', fontWeight: 700, fontSize: 14, marginBottom: 2 }}>
-                  Pontos de Equilíbrio — {MONTH_NAMES[month]}/{year}
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--brave-gray)', marginBottom: 16 }}>
-                  Receita mínima necessária para zerar o resultado em cada nível · Margem de contribuição: {(dre.mcPct * 100).toFixed(1)}% da receita
-                  {comImpostos && impostosMes > 0 && (
-                    <> · impostos de {fmt(impostosMes)} ({(impostosPct * 100).toFixed(1)}% da receita) exigem <strong>+{fmt(deltaImp)}</strong> de faturamento</>
-                  )}
-                </div>
-              </div>
-              <div style={{ display: 'flex', borderRadius: 8, overflow: 'hidden', border: '1px solid var(--brave-light)', background: 'var(--brave-light)', flexShrink: 0 }}>
-                {[{ on: false, label: 'Sem impostos' }, { on: true, label: 'Com impostos' }].map(opt => (
-                  <button key={opt.label} onClick={() => setComImpostos(opt.on)} style={{
-                    padding: '6px 14px', border: 'none', cursor: 'pointer', fontSize: 12,
-                    fontFamily: 'var(--font-sub)', fontWeight: comImpostos === opt.on ? 700 : 500,
-                    background: comImpostos === opt.on ? 'var(--brave-dark)' : 'transparent',
-                    color: comImpostos === opt.on ? '#fff' : 'var(--brave-gray)',
-                    transition: 'all 0.15s',
-                  }}>{opt.label}</button>
-                ))}
-              </div>
+          {dre.aClassificar > 0 && (
+            <div className="card mb-6" style={{ padding: '12px 20px', background: '#fffbea', border: '1px solid #f0c040' }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: '#7a5c00' }}>
+                ⚠ {fmt(dre.aClassificar)} em contas ainda não classificadas
+              </span>
+              <span style={{ fontSize: 12, color: '#7a5c00', marginLeft: 8 }}>
+                — o valor está fora do resultado. Ajuste a categoria em Plano de Contas.
+              </span>
             </div>
-            {impostosMes === 0 && (
-              <div style={{ fontSize: 11, color: '#7a5c00', background: '#fffbea', border: '1px solid #f0c040', borderRadius: 6, padding: '6px 10px', marginBottom: 12 }}>
-                Sem impostos classificados em {MONTH_NAMES[month]}/{year} — os dois modos mostram o mesmo valor.
-              </div>
-            )}
+          )}
+
+          {/* Ponto de equilíbrio — análise adicional ao modelo da planilha */}
+          <div className="card mb-6">
+            <div style={{ fontFamily: 'var(--font-sub)', fontWeight: 700, fontSize: 14, marginBottom: 2 }}>
+              Pontos de Equilíbrio — {MONTH_NAMES[month]}/{year}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--brave-gray)', marginBottom: 16 }}>
+              Receita mínima para zerar o resultado em cada nível · Margem de contribuição: {(dre.mcPct * 100).toFixed(1)}% da receita
+            </div>
             {dre.mcPct > 0 ? (
               <div className="metrics-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
                 {[
-                  { sigla: 'PEO', label: 'Ponto de Equilíbrio Operacional', value: dre.peo + deltaImp, hint: comImpostos ? 'cobre custos fixos + impostos' : 'cobre os custos fixos', achieved: dre.receitaBruta >= dre.peo + deltaImp },
-                  { sigla: 'PEI', label: 'Ponto de Equilíbrio de Investimentos', value: dre.pei + deltaImp, hint: comImpostos ? 'cobre fixos + investimentos + impostos' : 'cobre custos fixos + investimentos', achieved: dre.receitaBruta >= dre.pei + deltaImp },
-                  { sigla: 'PEF', label: 'Ponto de Equilíbrio Financeiro', value: dre.pef + deltaImp, hint: comImpostos ? 'cobre todos os desembolsos, incluindo impostos' : 'cobre tudo + desembolsos não operacionais', achieved: dre.receitaBruta >= dre.pef + deltaImp, highlight: true },
-                ].map(pe => (
-                  <div key={pe.sigla} className="metric-card" style={pe.highlight ? { border: '2px solid var(--brave-yellow)' } : undefined}>
-                    <div className="metric-accent" style={{ background: pe.achieved ? '#1a7a4a' : '#c0392b' }} />
-                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                      <span style={{ fontFamily: 'var(--font-sub)', fontWeight: 700, fontSize: 13 }}>{pe.sigla}</span>
-                      <span style={{ fontSize: 10, color: pe.achieved ? '#1a7a4a' : '#c0392b', fontWeight: 600 }}>
-                        {pe.achieved ? '✓ atingido' : '✗ não atingido'}
-                      </span>
+                  { sigla: 'PEO', label: 'Operacional', value: dre.peo, hint: 'cobre as despesas operacionais' },
+                  { sigla: 'PEI', label: 'Com impostos e financeiras', value: dre.pei, hint: 'cobre operacionais + impostos + financeiras' },
+                  { sigla: 'PEF', label: 'Financeiro', value: dre.pef, hint: 'cobre todos os desembolsos, inclusive sócios e CAPEX', highlight: true },
+                ].map(pe => {
+                  const atingido = dre.receitaBruta >= pe.value
+                  return (
+                    <div key={pe.sigla} className="metric-card" style={pe.highlight ? { border: '2px solid var(--brave-yellow)' } : undefined}>
+                      <div className="metric-accent" style={{ background: atingido ? '#1a7a4a' : '#c0392b' }} />
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                        <span style={{ fontFamily: 'var(--font-sub)', fontWeight: 700, fontSize: 13 }}>{pe.sigla}</span>
+                        <span style={{ fontSize: 10, color: atingido ? '#1a7a4a' : '#c0392b', fontWeight: 600 }}>
+                          {atingido ? '✓ atingido' : '✗ não atingido'}
+                        </span>
+                      </div>
+                      <div className="metric-value" style={{ fontSize: 17 }}>{fmt(pe.value)}</div>
+                      <div style={{ fontSize: 10, color: 'var(--brave-gray)', marginTop: 2 }}>{pe.label} — {pe.hint}</div>
                     </div>
-                    <div className="metric-value" style={{ fontSize: 17 }}>{fmt(pe.value)}</div>
-                    <div style={{ fontSize: 10, color: 'var(--brave-gray)', marginTop: 2 }}>{pe.label} — {pe.hint}</div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             ) : (
               <div style={{ fontSize: 13, color: 'var(--brave-gray)', padding: '8px 0' }}>
-                Margem de contribuição não positiva no período — o ponto de equilíbrio não é calculável (a operação não cobre os custos variáveis).
+                Margem de contribuição não positiva no período — ponto de equilíbrio não calculável.
               </div>
             )}
           </div>
 
           <div className="grid-2 mb-6">
             {/* DRE estruturada */}
-            <div className="card" style={{ overflowY: 'auto', maxHeight: 680, padding: 0 }}>
+            <div className="card" style={{ overflowY: 'auto', maxHeight: 720, padding: 0 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 14px 6px 14px', borderBottom: '1px solid var(--brave-light)' }}>
                 <div style={{ fontFamily: 'var(--font-sub)', fontWeight: 600, fontSize: 13 }}>
                   DRE — {MONTH_NAMES[month]}/{year} · {unitLabel}
@@ -243,31 +216,20 @@ export default function DREPage() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 1, padding: '6px 0' }}>
                 {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
                 {dre.lines.map((line: any, i: number) => {
-                  // Pontos de equilíbrio acompanham o modo com/sem impostos do painel
-                  const value = line.type === 'breakeven' ? line.value + deltaImp : line.value
-                  const showPct = line.type !== 'transfer' && line.type !== 'breakeven' && value !== 0 && dre.receitaBruta > 0
-                  const avPct = showPct ? pct(Math.abs(value), dre.receitaBruta) : '—'
+                  const showPct = line.type !== 'memo' && line.value !== 0 && dre.receitaBruta > 0
                   const isHighlight = line.type === 'subtotal'
-                  const pctColor = isHighlight
-                    ? (value >= 0 ? '#1a7a4a' : '#c0392b')
-                    : 'var(--brave-gray)'
-
+                  const pctColor = isHighlight ? (line.value >= 0 ? '#1a7a4a' : '#c0392b') : 'var(--brave-gray)'
                   return (
-                    <div key={i} style={{ ...lineStyle(line.type, line.indent), justifyContent: 'space-between' }}>
+                    <div key={i} style={lineStyle(line.type, line.indent)}>
                       <div style={{ flex: 1 }}>
-                        <div style={labelStyle(line.type, line.indent)}>
-                          {line.label}
-                          {line.type === 'breakeven' && comImpostos && deltaImp > 0 && (
-                            <span style={{ marginLeft: 5, fontSize: 9, color: '#856404', fontWeight: 600 }}>c/ impostos</span>
-                          )}
-                        </div>
+                        <div style={labelStyle(line.type, line.indent)}>{line.label}</div>
                         {line.sublabel && (
                           <div style={{ fontSize: 10, color: 'var(--brave-gray)' }}>{line.sublabel}</div>
                         )}
                       </div>
                       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
-                        <div style={{ ...valueStyle(line.type, value), minWidth: 90, textAlign: 'right' }}>
-                          {value !== 0 ? fmt(value) : '—'}
+                        <div style={{ ...valueStyle(line.type, line.value), minWidth: 90, textAlign: 'right' }}>
+                          {line.value !== 0 ? fmt(line.value) : '—'}
                         </div>
                         <div style={{
                           minWidth: 52, textAlign: 'right',
@@ -275,7 +237,7 @@ export default function DREPage() {
                           fontWeight: isHighlight ? 700 : 400,
                           color: showPct ? pctColor : 'transparent',
                         }}>
-                          {showPct ? avPct : '—'}
+                          {showPct ? pct(Math.abs(line.value), dre.receitaBruta) : '—'}
                         </div>
                       </div>
                     </div>
@@ -316,8 +278,10 @@ export default function DREPage() {
 
               <div style={{ marginTop: 24, display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {[
-                  { label: 'Lucro após Investimentos', value: dre.lucroAposInvestimentos },
-                  { label: 'Lucro antes dos Impostos', value: dre.lucroAntesImpostos },
+                  { label: 'Despesas Operacionais', value: -dre.despesasOperacionais },
+                  { label: 'Impostos', value: -dre.impostos },
+                  { label: 'Despesas Financeiras', value: -dre.financeiras },
+                  { label: 'Investimentos / CAPEX (memo)', value: -dre.investimentos },
                 ].map(r => (
                   <div key={r.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', background: 'var(--brave-light)', borderRadius: 8 }}>
                     <span style={{ fontSize: 12, color: 'var(--brave-gray)' }}>{r.label}</span>
@@ -338,10 +302,11 @@ export default function DREPage() {
                 <thead>
                   <tr>
                     <th>Mês</th>
-                    <th style={{ textAlign: 'right' }}>Rec. Bruta</th>
-                    <th style={{ textAlign: 'right' }}>Rec. Líquida</th>
+                    <th style={{ textAlign: 'right' }}>Receita Bruta</th>
+                    <th style={{ textAlign: 'right' }}>CMV</th>
                     <th style={{ textAlign: 'right' }}>Margem Contrib.</th>
                     <th style={{ textAlign: 'right' }}>Lucro Op.</th>
+                    <th style={{ textAlign: 'right' }}>EBITDA</th>
                     <th style={{ textAlign: 'right' }}>Lucro Líquido</th>
                     <th style={{ textAlign: 'right' }}>Margem %</th>
                   </tr>
@@ -355,11 +320,12 @@ export default function DREPage() {
                         {i + 1 === month && <span style={{ marginLeft: 6, fontSize: 10, color: 'var(--brave-yellow-dark)', fontWeight: 700 }}>◀</span>}
                       </td>
                       <td style={{ textAlign: 'right', fontSize: 12 }}>{d.receitaBruta > 0 ? fmt(d.receitaBruta) : '—'}</td>
-                      <td style={{ textAlign: 'right', fontSize: 12 }}>{d.receitaLiquida > 0 ? fmt(d.receitaLiquida) : '—'}</td>
+                      <td style={{ textAlign: 'right', fontSize: 12 }}>{d.cmv > 0 ? fmt(-d.cmv) : '—'}</td>
                       <td style={{ textAlign: 'right', fontSize: 12, color: d.margemContribuicao < 0 ? '#c0392b' : '' }}>{d.receitaBruta > 0 ? fmt(d.margemContribuicao) : '—'}</td>
-                      <td style={{ textAlign: 'right', fontSize: 12, color: d.resultadoOperacional < 0 ? '#c0392b' : '' }}>{d.receitaBruta > 0 ? fmt(d.resultadoOperacional) : '—'}</td>
-                      <td style={{ textAlign: 'right', fontSize: 12, fontWeight: 600, color: d.resultadoLiquido < 0 ? '#c0392b' : '#1a7a4a' }}>{d.receitaBruta > 0 ? fmt(d.resultadoLiquido) : '—'}</td>
-                      <td style={{ textAlign: 'right', fontSize: 12, color: 'var(--brave-gray)' }}>{d.receitaBruta > 0 ? pct(d.resultadoLiquido, d.receitaBruta) : '—'}</td>
+                      <td style={{ textAlign: 'right', fontSize: 12, color: d.lucroOperacional < 0 ? '#c0392b' : '' }}>{d.receitaBruta > 0 ? fmt(d.lucroOperacional) : '—'}</td>
+                      <td style={{ textAlign: 'right', fontSize: 12, color: d.ebitda < 0 ? '#c0392b' : '' }}>{d.receitaBruta > 0 ? fmt(d.ebitda) : '—'}</td>
+                      <td style={{ textAlign: 'right', fontSize: 12, fontWeight: 600, color: d.lucroLiquido < 0 ? '#c0392b' : '#1a7a4a' }}>{d.receitaBruta > 0 ? fmt(d.lucroLiquido) : '—'}</td>
+                      <td style={{ textAlign: 'right', fontSize: 12, color: 'var(--brave-gray)' }}>{d.receitaBruta > 0 ? pct(d.lucroLiquido, d.receitaBruta) : '—'}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -62,7 +62,7 @@ export default function Dashboard() {
   }))
 
   const margem = dre?.receitaBruta > 0
-    ? ((dre.resultadoLiquido / dre.receitaBruta) * 100).toFixed(1)
+    ? ((dre.lucroLiquido / dre.receitaBruta) * 100).toFixed(1)
     : '0.0'
 
   // Composição de despesas — grupos negativos da DRE (top 6 + Outros)
@@ -165,8 +165,9 @@ export default function Dashboard() {
               { label: 'Receita Bruta', value: dre.receitaBruta },
               { label: 'Receita Líquida', value: dre.receitaLiquida, pct: fmtPct(dre.receitaLiquida, dre.receitaBruta) },
               { label: 'Margem de Contribuição', value: dre.margemContribuicao, pct: fmtPct(dre.margemContribuicao, dre.receitaBruta) },
-              { label: 'Lucro Operacional', value: dre.resultadoOperacional, pct: fmtPct(dre.resultadoOperacional, dre.receitaBruta) },
-              { label: 'Resultado Líquido', value: dre.resultadoLiquido, pct: `${margem}%` },
+              { label: 'Lucro Operacional', value: dre.lucroOperacional, pct: fmtPct(dre.lucroOperacional, dre.receitaBruta) },
+              { label: 'EBITDA', value: dre.ebitda, pct: fmtPct(dre.ebitda, dre.receitaBruta) },
+              { label: 'Lucro Líquido Gerencial', value: dre.lucroLiquido, pct: margem + '%' },
             ].map(m => (
               <div className="metric-card" key={m.label}>
                 <div className="metric-accent" style={{ background: (m.value ?? 0) < 0 ? '#c0392b' : 'var(--brave-yellow)' }} />
