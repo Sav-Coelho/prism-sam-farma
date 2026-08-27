@@ -252,7 +252,7 @@ function parseRecebimentosNormalizado(matrix: string[][], fileName: string): Rec
 
     rows.push({
       fitid: base + (vistos[base] > 1 ? '_' + pad(vistos[base], 2) : ''),
-      canal,
+      canal: canalCanonico(canal),
       valor: Math.abs(valor),
       status,
       month,
@@ -330,7 +330,7 @@ function parseRecebimentosMatriz(matrix: string[][], fileName: string, anoPadrao
         vistos[base] = (vistos[base] || 0) + 1
         rows.push({
           fitid: base + (vistos[base] > 1 ? '_' + pad(vistos[base], 2) : ''),
-          canal: canal.replace(/\s+/g, ' ').trim(),
+          canal: canalCanonico(canal),
           valor: Math.abs(valor),
           status,
           month: bloco.month,
@@ -360,6 +360,32 @@ export function parseRecebimentos(matrix: string[][], fileName: string, anoPadra
   return parseRecebimentosNormalizado(matrix, fileName)
     ?? parseRecebimentosMatriz(matrix, fileName, anoPadrao)
     ?? { kind: 'recebimentos', rows: [], errors: ['Nenhum recebimento reconhecido na planilha'], totalRealizado: 0, totalPendente: 0 }
+}
+
+/**
+ * Nome canônico do canal de recebimento.
+ *
+ * A base histórica escreve "Recebimento RedeMatriz" e a planilha mensal
+ * "Cartão – Rede" para o mesmo canal. Sem normalizar, o mesmo canal vira duas
+ * contas e a linha se parte no meio do ano. A grafia canônica é a da aba
+ * "DRE Gerencial" do cliente.
+ */
+const CANAIS: [RegExp, string][] = [
+  [/rede\s*matriz|cart(ã|a)o\s*[–\-]?\s*rede/i, 'Cartão – RedeMatriz'],
+  [/brasil\s*card/i,                            'Cartão – BrasilCard'],
+  [/funcional/i,                                'Cartão – Funcional'],
+  [/^\s*(recebimento\s+)?pix\s*$/i,             'PIX'],
+  [/dep(ó|o)sito/i,                             'Depósito'],
+  [/transfer(ê|e)ncia/i,                        'Transferência Filial → Matriz'],
+  [/i\s*food/i,                                 'iFood'],
+  [/credi(á|a)rio/i,                            'Crediário'],
+  [/outros\s+recebimentos/i,                    'Outros Recebimentos'],
+]
+
+export function canalCanonico(nome: string): string {
+  const limpo = nome.replace(/\s+/g, ' ').trim()
+  const achado = CANAIS.find(([re]) => re.test(limpo))
+  return achado ? achado[1] : limpo
 }
 
 /** Último segmento do caminho do ERP — nome curto para exibir na DRE. */
