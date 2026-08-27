@@ -45,11 +45,18 @@ function valorCor(type: DRELineType, v: number): string {
   return type === 'subtotal' || type === 'group' || type === 'section' ? '#1a7a4a' : 'var(--brave-dark)'
 }
 
+/** Variação percentual entre dois valores, no padrão da aba Análise Horizontal. */
+function variacao(de: number, para: number): string {
+  if (de === 0) return '—'
+  return `${(((para - de) / Math.abs(de)) * 100).toFixed(1)}%`
+}
+
 export default function DREPage() {
   const [year, setYear] = useState(now.getFullYear())
   const [unitId, setUnitId] = useState<string>('')
-  const [modo, setModo] = useState<'valor' | 'av'>('valor')
   const [soEstrutura, setSoEstrutura] = useState(false)
+  /** Meses (0–11) com a coluna de análise vertical aberta. */
+  const [avAbertos, setAvAbertos] = useState<number[]>([])
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [units, setUnits] = useState<any[]>([])
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -79,20 +86,16 @@ export default function DREPage() {
 
   const linhas = soEstrutura ? matriz.filter(l => l.type !== 'account') : matriz
 
-  /** Base da análise vertical: receita bruta daquele mês (ou do ano na coluna Total). */
+  /** Base da análise vertical: receita bruta daquele mês. */
   const baseAV = (i: number) => meses[i]?.receitaBruta ?? 0
 
-  const TOGGLE: React.CSSProperties = {
-    display: 'flex', borderRadius: 8, overflow: 'hidden',
-    border: '1px solid var(--brave-light)', background: 'var(--brave-light)',
-  }
-  const TBTN = (active: boolean): React.CSSProperties => ({
-    padding: '6px 14px', border: 'none', cursor: 'pointer', fontSize: 12,
-    fontFamily: 'var(--font-sub)', fontWeight: active ? 700 : 500,
-    background: active ? 'var(--brave-dark)' : 'transparent',
-    color: active ? '#fff' : 'var(--brave-gray)',
-    transition: 'all 0.15s',
-  })
+  const alternarAV = (i: number) =>
+    setAvAbertos(prev => prev.indexOf(i) >= 0 ? prev.filter(x => x !== i) : prev.concat([i]).sort((a, b) => a - b))
+
+  // Extremos do período com dado — base da análise horizontal do ano
+  const primeiroMes = mesesComDado.length > 0 ? mesesComDado[0] : -1
+  const ultimoMes = mesesComDado.length > 0 ? mesesComDado[mesesComDado.length - 1] : -1
+  const temAH = primeiroMes >= 0 && ultimoMes > primeiroMes
 
   const TH: React.CSSProperties = {
     position: 'sticky', top: 0, zIndex: 2, background: 'var(--brave-white)',
@@ -107,10 +110,6 @@ export default function DREPage() {
           <p className="page-subtitle">Regime de caixa · janeiro a dezembro</p>
         </div>
         <div className="flex gap-2" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
-          <div style={TOGGLE}>
-            <button style={TBTN(modo === 'valor')} onClick={() => setModo('valor')}>R$</button>
-            <button style={TBTN(modo === 'av')} onClick={() => setModo('av')}>AV %</button>
-          </div>
           <select className="form-select" style={{ width: 170 }} value={unitId} onChange={e => setUnitId(e.target.value)}>
             <option value="">Consolidado</option>
             {units.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
@@ -174,16 +173,22 @@ export default function DREPage() {
                   Demonstração do Resultado Gerencial — {year} · {unitLabel}
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--brave-gray)', marginTop: 2 }}>
-                  {modo === 'valor'
-                    ? 'Valores em R$ · competência de caixa'
-                    : 'Análise vertical — participação sobre a Receita Operacional Bruta do mês'}
-                  {mesesComDado.length > 0 && ` · dados de ${MONTH_NAMES[mesesComDado[0] + 1]} a ${MONTH_NAMES[mesesComDado[mesesComDado.length - 1] + 1]}`}
+                  Valores em R$ · competência de caixa · clique no <strong>+</strong> do mês para abrir a análise vertical
+                  {mesesComDado.length > 0 && ` · dados de ${MONTH_NAMES[primeiroMes + 1]} a ${MONTH_NAMES[ultimoMes + 1]}`}
                 </div>
               </div>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                <input type="checkbox" checked={soEstrutura} onChange={e => setSoEstrutura(e.target.checked)} />
-                só os totais (esconder o detalhe por conta)
-              </label>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => setAvAbertos(avAbertos.length > 0 ? [] : mesesComDado)}
+                >
+                  {avAbertos.length > 0 ? '− Fechar AV%' : '+ AV% em todos os meses'}
+                </button>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                  <input type="checkbox" checked={soEstrutura} onChange={e => setSoEstrutura(e.target.checked)} />
+                  só os totais
+                </label>
+              </div>
             </div>
 
             <div style={{ overflowX: 'auto', maxHeight: 700, overflowY: 'auto' }}>
@@ -196,17 +201,40 @@ export default function DREPage() {
                     }}>
                       Conta
                     </th>
-                    {MONTH_NAMES.slice(1).map((m, i) => (
-                      <th key={m} style={{
-                        ...TH,
-                        minWidth: 92,
-                        color: mesesComDado.indexOf(i) >= 0 ? 'var(--brave-dark)' : 'var(--brave-gray)',
-                      }}>
-                        {m}
-                      </th>
-                    ))}
-                    <th style={{ ...TH, minWidth: 108, borderLeft: '2px solid var(--brave-light)', color: 'var(--brave-dark)' }}>
+                    {MONTH_NAMES.slice(1).map((m, i) => {
+                      const temDado = mesesComDado.indexOf(i) >= 0
+                      const aberto = avAbertos.indexOf(i) >= 0
+                      return [
+                        <th key={m} style={{ ...TH, minWidth: 100, color: temDado ? 'var(--brave-dark)' : 'var(--brave-gray)' }}>
+                          <button
+                            onClick={() => alternarAV(i)}
+                            title={aberto ? 'Fechar análise vertical de ' + m : 'Abrir análise vertical de ' + m}
+                            disabled={!temDado}
+                            style={{
+                              border: 'none', background: aberto ? 'var(--brave-dark)' : 'var(--brave-light)',
+                              color: aberto ? '#fff' : 'var(--brave-gray-mid)',
+                              borderRadius: 4, width: 17, height: 17, lineHeight: '15px',
+                              fontSize: 12, fontWeight: 700, marginRight: 6, padding: 0,
+                              cursor: temDado ? 'pointer' : 'not-allowed', opacity: temDado ? 1 : 0.4,
+                            }}
+                          >{aberto ? '−' : '+'}</button>
+                          {m}
+                        </th>,
+                        aberto ? (
+                          <th key={m + '-av'} style={{ ...TH, minWidth: 62, fontSize: 10, color: 'var(--brave-gray)', background: '#f8fafb' }}>
+                            AV %
+                          </th>
+                        ) : null,
+                      ]
+                    })}
+                    <th style={{ ...TH, minWidth: 112, borderLeft: '2px solid var(--brave-light)', color: 'var(--brave-dark)' }}>
                       Total {year}
+                    </th>
+                    <th style={{ ...TH, minWidth: 88, background: '#f8fafb' }}>
+                      AH ano
+                      <div style={{ fontSize: 9, fontWeight: 400, color: 'var(--brave-gray)' }}>
+                        {temAH ? MONTH_NAMES[primeiroMes + 1] + ' → ' + MONTH_NAMES[ultimoMes + 1] : '—'}
+                      </div>
                     </th>
                   </tr>
                 </thead>
@@ -229,26 +257,48 @@ export default function DREPage() {
                             <span style={{ fontSize: 10, color: 'var(--brave-gray)', marginLeft: 6 }}>{linha.sublabel}</span>
                           )}
                         </td>
-                        {linha.values.map((v, j) => (
+                        {linha.values.map((v, j) => [
                           <td key={j} style={{
                             textAlign: 'right', padding: '7px 12px', whiteSpace: 'nowrap',
                             color: valorCor(linha.type, v),
                             fontWeight: linha.type === 'subtotal' ? 700 : undefined,
                           }}>
-                            {cabecalhoMemo || v === 0
-                              ? '—'
-                              : modo === 'valor' ? fmt(v) : pct(Math.abs(v), baseAV(j))}
-                          </td>
-                        ))}
+                            {cabecalhoMemo || v === 0 ? '—' : fmt(v)}
+                          </td>,
+                          avAbertos.indexOf(j) >= 0 ? (
+                            <td key={j + '-av'} style={{
+                              textAlign: 'right', padding: '7px 10px', whiteSpace: 'nowrap',
+                              fontSize: 11, background: '#f8fafb',
+                              color: linha.type === 'subtotal' ? valorCor(linha.type, v) : 'var(--brave-gray-mid)',
+                              fontWeight: linha.type === 'subtotal' ? 700 : undefined,
+                            }}>
+                              {cabecalhoMemo || v === 0 ? '—' : pct(Math.abs(v), baseAV(j))}
+                            </td>
+                          ) : null,
+                        ])}
                         <td style={{
                           textAlign: 'right', padding: '7px 12px', whiteSpace: 'nowrap',
                           borderLeft: '2px solid var(--brave-light)',
                           color: valorCor(linha.type, linha.total),
                           fontWeight: linha.type === 'subtotal' || linha.type === 'group' ? 700 : 600,
                         }}>
-                          {cabecalhoMemo || linha.total === 0
-                            ? '—'
-                            : modo === 'valor' ? fmt(linha.total) : pct(Math.abs(linha.total), anual.receitaBruta)}
+                          {cabecalhoMemo || linha.total === 0 ? '—' : fmt(linha.total)}
+                        </td>
+                        <td style={{
+                          textAlign: 'right', padding: '7px 10px', whiteSpace: 'nowrap',
+                          fontSize: 11, background: '#f8fafb',
+                          color: (() => {
+                            if (cabecalhoMemo || !temAH) return 'var(--brave-gray)'
+                            const de = linha.values[primeiroMes], para = linha.values[ultimoMes]
+                            if (de === 0) return 'var(--brave-gray)'
+                            // Em despesa (valor negativo) crescer é ruim; em receita é bom
+                            const cresceu = para > de
+                            const positivo = de >= 0 ? cresceu : !cresceu
+                            return positivo ? '#1a7a4a' : '#c0392b'
+                          })(),
+                          fontWeight: linha.type === 'subtotal' ? 700 : undefined,
+                        }}>
+                          {cabecalhoMemo || !temAH ? '—' : variacao(linha.values[primeiroMes], linha.values[ultimoMes])}
                         </td>
                       </tr>
                     )
