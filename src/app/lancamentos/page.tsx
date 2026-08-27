@@ -14,7 +14,7 @@ const fmtDate = (d: string) => new Date(d).toLocaleDateString('pt-BR')
 const now = new Date()
 const YEARS = [now.getFullYear() - 2, now.getFullYear() - 1, now.getFullYear(), now.getFullYear() + 1]
 
-type Filter = 'all' | 'sem-conta' | 'pendente' | 'entradas' | 'saidas'
+type Filter = 'all' | 'sem-conta' | 'sem-unidade' | 'pendente' | 'entradas' | 'saidas'
 
 interface PagamentoRow {
   fitid: string
@@ -153,6 +153,51 @@ export default function Lancamentos() {
     ))
   }
 
+  /** Define a unidade de um lançamento — usado nos recebimentos, que chegam sem loja. */
+  const definirUnidade = async (txId: number, novoUnitId: string) => {
+    const res = await fetch(`/api/transactions/${txId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ unitId: novoUnitId || null })
+    })
+    if (!res.ok) { showToast('Erro ao definir a unidade'); return }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const unidade = units.find((u: any) => String(u.id) === novoUnitId) ?? null
+    setTransactions(prev => prev.map(t =>
+      t.id === txId ? { ...t, unitId: novoUnitId ? parseInt(novoUnitId) : null, unit: unidade } : t
+    ))
+  }
+
+  /** O select em lote manda '__nenhuma' quando a escolha é deixar sem loja. */
+  const aplicarUnidadeEmLote = (valor: string) =>
+    definirUnidadeSelecionadas(valor === '__nenhuma' ? '' : valor)
+
+  /** Mesma coisa, para tudo que estiver marcado na tabela. */
+  const definirUnidadeSelecionadas = async (novoUnitId: string) => {
+    const ids = Array.from(selectedTxIds)
+    if (ids.length === 0) return
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const unidade = units.find((u: any) => String(u.id) === novoUnitId) ?? null
+    const nome = unidade ? unidade.name : 'sem unidade'
+    if (!confirm(`Definir ${ids.length} lançamento${ids.length > 1 ? 's' : ''} como ${nome}?`)) return
+
+    const respostas = await Promise.all(ids.map(id =>
+      fetch(`/api/transactions/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ unitId: novoUnitId || null })
+      })
+    ))
+    const falhas = respostas.filter(r => !r.ok).length
+    setTransactions(prev => prev.map(t =>
+      selectedTxIds.has(t.id) ? { ...t, unitId: novoUnitId ? parseInt(novoUnitId) : null, unit: unidade } : t
+    ))
+    setSelectedTxIds(new Set())
+    showToast(falhas
+      ? `${ids.length - falhas} atualizados · ${falhas} falharam`
+      : `✓ ${ids.length} lançamento${ids.length > 1 ? 's definidos' : ' definido'} como ${nome}`)
+  }
+
   const remove = async (id: number) => {
     await fetch(`/api/transactions/${id}`, { method: 'DELETE' })
     setTransactions(prev => prev.filter(t => t.id !== id))
@@ -174,6 +219,7 @@ export default function Lancamentos() {
 
   const filtered = transactions.filter(t => {
     if (filter === 'sem-conta') return !t.accountId || t.account?.dreGroup === '⚠ A Classificar'
+    if (filter === 'sem-unidade') return !t.unitId
     if (filter === 'pendente') return t.status === 'PENDENTE'
     if (filter === 'entradas') return t.amount > 0
     if (filter === 'saidas') return t.amount < 0
@@ -181,6 +227,7 @@ export default function Lancamentos() {
   })
 
   const semConta = transactions.filter(t => !t.accountId || t.account?.dreGroup === '⚠ A Classificar').length
+  const semUnidade = transactions.filter(t => !t.unitId).length
   const pendentes = transactions.filter(t => t.status === 'PENDENTE').length
   const totalEntradas = transactions.filter(t => t.amount > 0 && t.status === 'REALIZADO').reduce((s, t) => s + t.amount, 0)
   const totalSaidas = transactions.filter(t => t.amount < 0 && t.status === 'REALIZADO').reduce((s, t) => s + Math.abs(t.amount), 0)
@@ -374,10 +421,11 @@ export default function Lancamentos() {
       )}
 
       {/* KPIs / filtros */}
-      <div className="metrics-grid mb-6" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
+      <div className="metrics-grid mb-6" style={{ gridTemplateColumns: 'repeat(6, 1fr)' }}>
         {([
           { key: 'all', label: 'Total no período', value: String(transactions.length) },
           { key: 'sem-conta', label: 'A classificar', value: String(semConta), color: semConta > 0 ? '#c0392b' : '#1a7a4a' },
+          { key: 'sem-unidade', label: 'Sem unidade', value: String(semUnidade), color: semUnidade > 0 ? '#b58b00' : '#1a7a4a' },
           { key: 'pendente', label: 'Pendentes (projetado)', value: String(pendentes), color: '#b58b00' },
           { key: 'entradas', label: 'Entradas', value: fmt(totalEntradas), color: '#1a7a4a' },
           { key: 'saidas', label: 'Saídas', value: fmt(totalSaidas), color: '#c0392b' },
@@ -404,13 +452,41 @@ export default function Lancamentos() {
             {unitId ? units.find((u: any) => u.id === parseInt(unitId))?.name : 'Consolidado'} — {MONTH_NAMES[month]}/{year} — {filtered.length} lançamentos
           </span>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            {filtered.length > 0 && (
+              selectedTxIds.size === filtered.length
+                ? <button className="btn btn-secondary btn-sm" onClick={() => setSelectedTxIds(new Set())}>Desmarcar todas</button>
+                : <button className="btn btn-secondary btn-sm" onClick={() => setSelectedTxIds(new Set(filtered.map(t => t.id)))}>
+                    Selecionar as {filtered.length} visíveis
+                  </button>
+            )}
             {selectedTxIds.size > 0 && (
-              <button className="btn btn-danger btn-sm" onClick={removeSelected}>
-                Excluir selecionadas ({selectedTxIds.size})
-              </button>
+              <>
+                <select
+                  className="form-select"
+                  style={{ fontSize: 12, width: 210 }}
+                  value=""
+                  onChange={e => { if (e.target.value !== '') aplicarUnidadeEmLote(e.target.value) }}
+                >
+                  <option value="">Definir unidade de {selectedTxIds.size}...</option>
+                  {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                  {units.map((u: any) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                  <option value="__nenhuma">— sem unidade (consolidado) —</option>
+                </select>
+                <button className="btn btn-danger btn-sm" onClick={removeSelected}>
+                  Excluir ({selectedTxIds.size})
+                </button>
+              </>
             )}
           </div>
         </div>
+
+        {filter === 'sem-unidade' && semUnidade > 0 && (
+          <div style={{ padding: '10px 24px', background: '#e8f0fe', fontSize: 12, color: '#1a5fa8', borderBottom: '1px solid var(--brave-light)' }}>
+            Estes lançamentos não têm loja. Na DRE por unidade, a receita sem loja é <strong>rateada</strong>
+            pela participação no faturamento — ao definir a unidade aqui, o valor passa a ser contabilizado
+            como <strong>real</strong> daquela loja, sem rateio.
+          </div>
+        )}
         {loading ? (
           <div style={{ padding: 40, textAlign: 'center', color: 'var(--brave-gray)' }}>Carregando...</div>
         ) : filtered.length === 0 ? (
@@ -448,7 +524,22 @@ export default function Lancamentos() {
                     <td style={{ maxWidth: 240 }}>
                       <div style={{ fontSize: 13 }}>{tx.description}</div>
                     </td>
-                    <td style={{ fontSize: 11, color: 'var(--brave-gray)', whiteSpace: 'nowrap' }}>{tx.unit?.name || '—'}</td>
+                    <td>
+                      <select
+                        className="form-select"
+                        style={{
+                          fontSize: 11, padding: '4px 6px', minWidth: 148,
+                          borderColor: tx.unitId ? undefined : '#f0c040',
+                          background: tx.unitId ? undefined : '#fffbea',
+                        }}
+                        value={tx.unitId ? String(tx.unitId) : ''}
+                        onChange={e => definirUnidade(tx.id, e.target.value)}
+                      >
+                        <option value="">— sem unidade —</option>
+                        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                        {units.map((u: any) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                      </select>
+                    </td>
                     <td style={{ textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap', color: tx.amount >= 0 ? '#1a7a4a' : '#c0392b' }}>
                       {fmt(tx.amount)}
                     </td>
