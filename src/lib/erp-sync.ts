@@ -98,7 +98,8 @@ export async function resolverContasCanal(canais: string[]): Promise<Record<stri
 
 /** Nome de unidade a partir do apelido do ERP ("FARMA & FARMA - GOIANA" → "GOIANA"). */
 export function nomeUnidade(apelido: string, codigo: string): string {
-  const limpo = apelido.replace(/^FARMA\s*&\s*FARMA\s*-\s*/i, '').trim()
+  // O ERP escreve "FARMA & FARMA - GOIANA" e também "FARMA & FARMA REPRESENTAÇÕES" (sem hífen)
+  const limpo = apelido.replace(/^FARMA\s*&\s*FARMA\s*-?\s*/i, '').trim()
   return (limpo || apelido || codigo || 'SEM UNIDADE').toUpperCase()
 }
 
