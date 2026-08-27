@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import Shell from '@/components/Shell'
+import Shell, { EVENTO_MENU } from '@/components/Shell'
 import { MONTH_NAMES, DRELineType, DRERowAnual } from '@/lib/dre'
 
 const fmt = (v: number) =>
@@ -57,6 +57,14 @@ export default function DREPage() {
   const [soEstrutura, setSoEstrutura] = useState(false)
   /** Meses (0–11) com a coluna de análise vertical aberta. */
   const [avAbertos, setAvAbertos] = useState<number[]>([])
+  /** Tela cheia: esconde o menu e os cards para a tabela ocupar tudo. */
+  const [telaCheia, setTelaCheia] = useState(false)
+
+  const alternarTelaCheia = () => {
+    const alvo = !telaCheia
+    setTelaCheia(alvo)
+    window.dispatchEvent(new CustomEvent(EVENTO_MENU, { detail: alvo }))
+  }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [units, setUnits] = useState<any[]>([])
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -104,12 +112,15 @@ export default function DREPage() {
 
   return (
     <Shell>
-      <div className="page-header flex-between">
+      <div className="page-header flex-between" style={telaCheia ? { marginBottom: 12 } : undefined}>
         <div>
-          <h1 className="page-title">DRE Gerencial {year} — {unitLabel}</h1>
-          <p className="page-subtitle">Regime de caixa · janeiro a dezembro</p>
+          <h1 className="page-title" style={telaCheia ? { fontSize: 18 } : undefined}>DRE Gerencial {year} — {unitLabel}</h1>
+          {!telaCheia && <p className="page-subtitle">Regime de caixa · janeiro a dezembro</p>}
         </div>
         <div className="flex gap-2" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+          <button className="btn btn-secondary btn-sm" onClick={alternarTelaCheia}>
+            {telaCheia ? '⤡ Sair da tela cheia' : '⛶ Tela cheia'}
+          </button>
           <select className="form-select" style={{ width: 170 }} value={unitId} onChange={e => setUnitId(e.target.value)}>
             <option value="">Consolidado</option>
             {units.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
@@ -134,8 +145,8 @@ export default function DREPage() {
         </div>
       ) : (
         <>
-          {/* KPIs do ano */}
-          <div className="metrics-grid mb-6">
+          {/* KPIs do ano — saem de cena na tela cheia para a tabela crescer */}
+          <div className="metrics-grid mb-6" style={telaCheia ? { display: 'none' } : undefined}>
             {[
               { label: 'Receita Bruta', value: anual.receitaBruta },
               { label: 'Margem de Contribuição', value: anual.margemContribuicao, sub: pct(anual.margemContribuicao, anual.receitaBruta) },
@@ -154,7 +165,7 @@ export default function DREPage() {
             ))}
           </div>
 
-          {anual.aClassificar > 0 && (
+          {anual.aClassificar > 0 && !telaCheia && (
             <div className="card mb-6" style={{ padding: '12px 20px', background: '#fffbea', border: '1px solid #f0c040' }}>
               <span style={{ fontSize: 13, fontWeight: 600, color: '#7a5c00' }}>
                 ⚠ R$ {fmt(anual.aClassificar)} em contas ainda não classificadas no ano
@@ -165,8 +176,11 @@ export default function DREPage() {
             </div>
           )}
 
-          {/* A tabela grande: linhas da DRE × meses */}
-          <div className="card mb-6" style={{ padding: 0, overflow: 'hidden' }}>
+          {/* A tabela grande: linhas da DRE × meses.
+              Na tela cheia sangra até as bordas, anulando o padding do main. */}
+          <div className="card mb-6" style={telaCheia
+            ? { padding: 0, overflow: 'hidden', margin: '0 -32px', borderRadius: 0, borderLeft: 'none', borderRight: 'none' }
+            : { padding: 0, overflow: 'hidden' }}>
             <div style={{ padding: '16px 20px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap', borderBottom: '1px solid var(--brave-light)' }}>
               <div>
                 <div style={{ fontFamily: 'var(--font-sub)', fontWeight: 700, fontSize: 14 }}>
@@ -191,7 +205,11 @@ export default function DREPage() {
               </div>
             </div>
 
-            <div style={{ overflowX: 'auto', maxHeight: 700, overflowY: 'auto' }}>
+            <div style={{
+              overflowX: 'auto',
+              maxHeight: telaCheia ? 'calc(100vh - 190px)' : 700,
+              overflowY: 'auto',
+            }}>
               <table style={{ fontSize: 12, borderCollapse: 'separate', borderSpacing: 0, minWidth: 1180 }}>
                 <thead>
                   <tr>
@@ -310,7 +328,7 @@ export default function DREPage() {
           </div>
 
           {/* Ponto de equilíbrio — análise adicional ao modelo da planilha */}
-          <div className="card">
+          <div className="card" style={telaCheia ? { display: 'none' } : undefined}>
             <div style={{ fontFamily: 'var(--font-sub)', fontWeight: 700, fontSize: 14, marginBottom: 2 }}>
               Pontos de Equilíbrio — acumulado {year}
             </div>
