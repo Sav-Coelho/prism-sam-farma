@@ -11,11 +11,15 @@ datasource db {
 
 /// Unidade de negócio (loja / filial). Toda transação pode ser filtrada por unidade.
 model Unit {
-  id           Int           @id @default(autoincrement())
-  name         String        @unique
-  bankAccounts BankAccount[]
-  transactions Transaction[]
-  sales        UnitSales[]
+  id             Int             @id @default(autoincrement())
+  name           String          @unique
+  bankAccounts   BankAccount[]
+  transactions   Transaction[]
+  sales          UnitSales[]
+  stockPositions StockPosition[]
+  salesItems     SalesItem[]
+  dailySales     DailySale[]
+  stockImports   StockImport[]
 }
 
 /// Conta bancária / caixa de uma unidade.
@@ -71,6 +75,101 @@ model Transaction {
   createdAt               DateTime     @default(now())
 
   @@index([month, year])
+}
+
+// ── Estoque & Compras (réplica da ferramenta de margem e reposição da Brave) ──
+
+/// Produto do catálogo do ERP. `barcode` normalizado (dígitos sem zeros à esquerda).
+model Product {
+  id        Int             @id @default(autoincrement())
+  barcode   String          @unique
+  name      String
+  createdAt DateTime        @default(now())
+  stock     StockPosition[]
+  sales     SalesItem[]
+  daily     DailySale[]
+}
+
+/// Snapshot do relatório de Estoque por loja — cada importação SUBSTITUI o da unidade.
+model StockPosition {
+  id        Int     @id @default(autoincrement())
+  productId Int
+  product   Product @relation(fields: [productId], references: [id])
+  unitId    Int
+  unit      Unit    @relation(fields: [unitId], references: [id])
+  abc       String?
+  /// Classificação 2º nível (texto após ">"), base das exclusões de não-mercadoria
+  category  String?
+  qty       Float   @default(0)
+  price     Float   @default(0)
+  cost      Float   @default(0)
+
+  @@unique([productId, unitId])
+  @@index([unitId])
+}
+
+/// Snapshot do relatório "Vendas por item" (período corrente) — SUBSTITUI por unidade.
+model SalesItem {
+  id        Int     @id @default(autoincrement())
+  productId Int
+  product   Product @relation(fields: [productId], references: [id])
+  unitId    Int
+  unit      Unit    @relation(fields: [unitId], references: [id])
+  abc       String?
+  qty       Float   @default(0)
+  revenue   Float   @default(0)
+  /// Custo unit. do relatório de vendas — fallback quando o produto não está no estoque
+  cost      Float   @default(0)
+
+  @@unique([productId, unitId])
+  @@index([unitId])
+}
+
+/// Diário de vendas (uma linha por dia × produto) — reimportar um dia substitui o dia.
+model DailySale {
+  id        Int      @id @default(autoincrement())
+  date      DateTime
+  productId Int
+  product   Product  @relation(fields: [productId], references: [id])
+  unitId    Int
+  unit      Unit     @relation(fields: [unitId], references: [id])
+  qty       Float    @default(0)
+  revenue   Float    @default(0)
+
+  @@unique([date, productId, unitId])
+  @@index([unitId, date])
+}
+
+/// Parâmetros do motor de margem/reposição (linha única, id = 1).
+model StockSettings {
+  id                  Int      @id @default(1)
+  metaMargem          Float    @default(0.28)
+  pctCustosVar        Float    @default(0.235)
+  custoFixoMensal     Float    @default(130000)
+  leadTimeDias        Float    @default(2)
+  cicloDias           Float    @default(20)
+  nivelServicoZ       Float    @default(1.65)
+  segurancaDias       Float    @default(7)
+  /// Período coberto pelo relatório de vendas, em meses (usado sem diário suficiente)
+  periodoMeses        Float    @default(6.44)
+  minDiasDiario       Int      @default(30)
+  benchmarkMargem     Float    @default(0.274)
+  /// Categorias fora do painel (não-mercadoria), separadas por "|"
+  categoriasExcluidas String   @default("IMOBILIZADO|MATERIAL DE LOJA|SERVIÇOS FARMACÊUTICOS|USO E CONSUMO")
+  updatedAt           DateTime @updatedAt
+}
+
+/// Rastro de cada importação de estoque/vendas/diário.
+model StockImport {
+  id        Int      @id @default(autoincrement())
+  kind      String
+  unitId    Int
+  unit      Unit     @relation(fields: [unitId], references: [id])
+  fileName  String
+  rows      Int
+  createdAt DateTime @default(now())
+
+  @@index([unitId, kind])
 }
 
 /// Faturamento e CMV por loja/mês (aba Base_Vendas do arquivo da DRE).

@@ -7,6 +7,7 @@ const NAV = [
   { href: '/lancamentos', icon: '↑↓', label: 'Lançamentos' },
   { href: '/dre', icon: '▦', label: 'DRE' },
   { href: '/fluxo-projetado', icon: '📅', label: 'Fluxo Projetado' },
+  { href: '/estoque', icon: '📦', label: 'Estoque & Compras' },
 ]
 
 const NAV_CONFIG = [

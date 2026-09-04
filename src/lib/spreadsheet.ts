@@ -15,17 +15,20 @@ function detectDelimiter(line: string): string {
   return ','
 }
 
-/** Lê a primeira aba (ou o CSV) e devolve uma matriz de strings já aparadas. */
-export function readSheetMatrix(buffer: ArrayBuffer, fileName: string): string[][] {
+/** Lê a primeira aba (ou o CSV) e devolve uma matriz de strings já aparadas.
+ *  `raw` lê o valor cru das células — necessário quando há código de barras
+ *  numérico, que o modo formatado exibe em notação científica ("7.896E+12"). */
+export function readSheetMatrix(buffer: ArrayBuffer, fileName: string, raw = false, maxRows?: number): string[][] {
   if (fileName.toLowerCase().endsWith('.csv') || fileName.toLowerCase().endsWith('.txt')) {
     const text = new TextDecoder('utf-8').decode(buffer).replace(/^﻿/, '')
     const rows = text.split(/\r?\n/).filter(l => l.trim().length > 0)
     const delim = detectDelimiter(rows[0] || '')
     return rows.map(l => l.split(delim).map(c => c.replace(/^["']|["']$/g, '').trim()))
   }
-  const wb = XLSX.read(buffer, { type: 'buffer', cellDates: false, raw: false })
+  // `maxRows` protege contra exports "formatados" até a linha 99.999 sem dado nenhum
+  const wb = XLSX.read(buffer, { type: 'buffer', cellDates: false, raw, ...(maxRows ? { sheetRows: maxRows } : {}) })
   const sheet = wb.Sheets[wb.SheetNames[0]]
-  const data = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, blankrows: false, defval: '' })
+  const data = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, blankrows: false, defval: '', raw })
   return data.map(row => (row as unknown[]).map(c => String(c ?? '').trim()))
 }
 
