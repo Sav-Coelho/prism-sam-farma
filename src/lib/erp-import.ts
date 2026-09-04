@@ -42,6 +42,8 @@ export interface RecebimentoRow {
   status: 'REALIZADO' | 'PENDENTE'
   month: number
   year: number
+  /** Apelido da unidade no ERP ("FARMA & FARMA - GOIANA") — só o arquivo mensal por loja traz */
+  unidade?: string
 }
 
 export interface PagamentosResult {
@@ -82,6 +84,7 @@ export function sniffKind(matrix: string[][]): FileKind {
   if (/contas? a receber/i.test(head) || (head.includes('canal') && head.includes('compet'))) {
     return 'recebimentos'
   }
+  if (ehRecebiveisSemCabecalho(matrix)) return 'recebimentos'
   return 'desconhecido'
 }
 
@@ -202,8 +205,66 @@ export function parsePagamentos(matrix: string[][], fileName: string): Pagamento
 
 // ── Recebidos e Recebíveis ────────────────────────────────────────────
 
+/**
+ * Chave estável do recebimento agregado: mês · unidade · canal · situação.
+ * Sem o nome do arquivo de propósito — a gravação substitui o mês inteiro,
+ * então reimportar (com qualquer nome) nunca duplica.
+ */
+function fitidRecebimento(ano: number, mes: number, unidade: string, canal: string, status: string): string {
+  const apelido = unidade.split('-').pop() || unidade   // "FARMA & FARMA - GOIANA" → "GOIANA"
+  return 'sf_rec_' + ano + pad(mes, 2) + '_' + (slug(apelido, 12) || 'x') + '_' + slug(canal, 14) + '_' + (status === 'PENDENTE' ? 'p' : 'r')
+}
+
+/**
+ * Arquivo mensal de recebíveis do ERP, SEM cabeçalho — uma linha por canal × loja:
+ *   Ano · Mês · AAAAMM · Canal · Valor · Unidade [· Situação]
+ * (o export vem com dezenas de milhares de linhas vazias formatadas abaixo — ignoradas)
+ */
+function ehRecebiveisSemCabecalho(matrix: string[][]): boolean {
+  const linha = matrix.find(l => l.some(c => String(c ?? '').trim() !== ''))
+  if (!linha) return false
+  const ano = String(linha[0] ?? '').trim()
+  const mes = parseInt(String(linha[1] ?? ''))
+  const comp = String(linha[2] ?? '').replace(/\D/g, '')
+  const valor = parseNumberBR(String(linha[4] ?? '').replace(/^R+\$?/i, ''))
+  return /^\d{4}$/.test(ano) && mes >= 1 && mes <= 12
+    && comp === ano + pad(mes, 2)
+    && String(linha[3] ?? '').trim() !== ''
+    && !isNaN(valor)
+}
+
+function parseRecebimentosSemCabecalho(matrix: string[][]): RecebimentoRow[] {
+  const agregado: Record<string, RecebimentoRow> = {}
+  const ordem: string[] = []
+  matrix.forEach(linha => {
+    const ano = parseInt(String(linha[0] ?? ''))
+    const mes = parseInt(String(linha[1] ?? ''))
+    if (!ano || !mes || mes < 1 || mes > 12) return
+    const canalBruto = String(linha[3] ?? '').trim()
+    const valor = parseNumberBR(String(linha[4] ?? '').replace(/^R+\$?/i, ''))
+    if (!canalBruto || isNaN(valor) || valor === 0) return
+    const unidade = String(linha[5] ?? '').trim()
+    const statusTxt = String(linha[6] ?? '').toLowerCase()
+    const status: 'REALIZADO' | 'PENDENTE' = statusTxt.includes('receber') ? 'PENDENTE' : 'REALIZADO'
+    const canal = canalCanonico(canalBruto)
+    const chave = ano + pad(mes, 2) + '|' + unidade.toLowerCase() + '|' + canal.toLowerCase() + '|' + status
+    if (agregado[chave]) { agregado[chave].valor += Math.abs(valor); return }
+    agregado[chave] = {
+      fitid: fitidRecebimento(ano, mes, unidade, canal, status),
+      canal,
+      valor: Math.abs(valor),
+      status,
+      month: mes,
+      year: ano,
+      unidade: unidade || undefined,
+    }
+    ordem.push(chave)
+  })
+  return ordem.map(k => agregado[k])
+}
+
 /** Formato normalizado: Competência (ou Ano+Mês) · Canal · Valor. */
-function parseRecebimentosNormalizado(matrix: string[][], fileName: string): RecebimentosResult | null {
+function parseRecebimentosNormalizado(matrix: string[][]): RecebimentosResult | null {
   let hdrRow = -1
   for (let r = 0; r < Math.min(matrix.length, 10); r++) {
     const h = matrix[r].map(c => c.toLowerCase())
@@ -222,7 +283,6 @@ function parseRecebimentosNormalizado(matrix: string[][], fileName: string): Rec
   const rows: RecebimentoRow[] = []
   const errors: string[] = []
   const vistos: Record<string, number> = {}
-  const arq = slug(fileName.replace(/\.[^.]+$/, ''), 12) || 'rec'
 
   for (let r = hdrRow + 1; r < matrix.length; r++) {
     const linha = matrix[r]
@@ -247,7 +307,7 @@ function parseRecebimentosNormalizado(matrix: string[][], fileName: string): Rec
 
     const statusTxt = cStatus >= 0 ? String(linha[cStatus] ?? '').toLowerCase() : ''
     const status: 'REALIZADO' | 'PENDENTE' = statusTxt.includes('receber') ? 'PENDENTE' : 'REALIZADO'
-    const base = 'sf_rec_' + arq + '_' + year + pad(month, 2) + '_' + slug(canal, 14) + '_' + (status === 'PENDENTE' ? 'p' : 'r')
+    const base = fitidRecebimento(year, month, '', canalCanonico(canal), status)
     vistos[base] = (vistos[base] || 0) + 1
 
     rows.push({
@@ -268,11 +328,10 @@ function parseRecebimentosNormalizado(matrix: string[][], fileName: string): Rec
  * Formato em matriz: células "Contas a receber <Mês>" abrem um bloco, a linha
  * seguinte diz "recebidos"/"a receber" e as linhas abaixo trazem canal + valores.
  */
-function parseRecebimentosMatriz(matrix: string[][], fileName: string, anoPadrao: number): RecebimentosResult | null {
+function parseRecebimentosMatriz(matrix: string[][], anoPadrao: number): RecebimentosResult | null {
   const rows: RecebimentoRow[] = []
   const errors: string[] = []
   const vistos: Record<string, number> = {}
-  const arq = slug(fileName.replace(/\.[^.]+$/, ''), 12) || 'rec'
 
   const blocos: { row: number; col: number; month: number; year: number }[] = []
   matrix.forEach((linha, r) => {
@@ -326,7 +385,7 @@ function parseRecebimentosMatriz(matrix: string[][], fileName: string, anoPadrao
         const valor = parseNumberBR(String(linha[c] ?? ''))
         if (isNaN(valor) || valor === 0) continue
         const status = statusPorCol[c] ?? (semSub && c === canalCol + 1 ? 'REALIZADO' : statusPorCol[c] ?? 'PENDENTE')
-        const base = 'sf_rec_' + arq + '_' + bloco.year + pad(bloco.month, 2) + '_' + slug(canal, 14) + '_' + (status === 'PENDENTE' ? 'p' : 'r')
+        const base = fitidRecebimento(bloco.year, bloco.month, '', canalCanonico(canal), status)
         vistos[base] = (vistos[base] || 0) + 1
         rows.push({
           fitid: base + (vistos[base] > 1 ? '_' + pad(vistos[base], 2) : ''),
@@ -357,9 +416,13 @@ function finalizarRecebimentos(rows: RecebimentoRow[], errors: string[]): Recebi
 }
 
 export function parseRecebimentos(matrix: string[][], fileName: string, anoPadrao: number): RecebimentosResult {
-  return parseRecebimentosNormalizado(matrix, fileName)
-    ?? parseRecebimentosMatriz(matrix, fileName, anoPadrao)
-    ?? { kind: 'recebimentos', rows: [], errors: ['Nenhum recebimento reconhecido na planilha'], totalRealizado: 0, totalPendente: 0 }
+  if (ehRecebiveisSemCabecalho(matrix)) {
+    const rows = parseRecebimentosSemCabecalho(matrix)
+    if (rows.length > 0) return finalizarRecebimentos(rows, [])
+  }
+  return parseRecebimentosNormalizado(matrix)
+    ?? parseRecebimentosMatriz(matrix, anoPadrao)
+    ?? { kind: 'recebimentos', rows: [], errors: ['Nenhum recebimento reconhecido na planilha (' + fileName + ')'], totalRealizado: 0, totalPendente: 0 }
 }
 
 /**

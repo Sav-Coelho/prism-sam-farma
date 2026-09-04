@@ -1,6 +1,6 @@
 import { prisma } from '@/lib/prisma'
 import { NextRequest, NextResponse } from 'next/server'
-import { resolverContasErp, resolverContasCanal, resolverUnidades } from '@/lib/erp-sync'
+import { resolverContasErp, resolverUnidades, gravarRecebimentos } from '@/lib/erp-sync'
 import type { PagamentoRow, RecebimentoRow } from '@/lib/erp-import'
 
 export const runtime = 'nodejs'
@@ -79,39 +79,24 @@ async function salvarPagamentos(corpo: CorpoPagamentos) {
   })
 }
 
+/**
+ * Recebimentos SUBSTITUEM o mês: o que já estava gravado dos meses presentes no
+ * arquivo é apagado antes de gravar (ver `gravarRecebimentos`) — reimportar nunca soma.
+ */
 async function salvarRecebimentos(corpo: CorpoRecebimentos) {
   const { rows, unitId } = corpo
   if (!Array.isArray(rows) || rows.length === 0) {
     return NextResponse.json({ error: 'Nenhum recebimento selecionado' }, { status: 400 })
   }
-
-  const contas = await resolverContasCanal(rows.map(r => r.canal))
   const unit = unitId ? parseInt(String(unitId)) : null
-
-  const data = rows.map(r => {
-    // Recebimento agregado do mês: data = último dia da competência
-    const fim = new Date(r.year, r.month, 0)
-    return {
-      fitid: r.fitid,
-      date: fim,
-      dueDate: fim,
-      description: r.canal,
-      memo: r.canal + ' · ' + (r.status === 'PENDENTE' ? 'a receber' : 'recebido'),
-      amount: Math.abs(r.valor),
-      month: r.month,
-      year: r.year,
-      status: r.status,
-      accountId: contas[r.canal.toLowerCase()] ?? null,
-      unitId: unit,
-    }
-  })
-
-  const resultado = await prisma.transaction.createMany({ data, skipDuplicates: true })
+  const r = await gravarRecebimentos(rows, unit)
   return NextResponse.json({
-    imported: resultado.count,
-    skipped: rows.length - resultado.count,
-    realizados: rows.filter(r => r.status === 'REALIZADO').length,
-    pendentes: rows.filter(r => r.status === 'PENDENTE').length,
+    imported: r.gravados,
+    skipped: rows.length - r.gravados,
+    substituidos: r.apagados,
+    meses: r.meses,
+    realizados: rows.filter(x => x.status === 'REALIZADO').length,
+    pendentes: rows.filter(x => x.status === 'PENDENTE').length,
   })
 }
 

@@ -38,6 +38,7 @@ interface RecebimentoRow {
   status: 'REALIZADO' | 'PENDENTE'
   month: number
   year: number
+  unidade?: string
 }
 
 interface Previa {
@@ -50,6 +51,10 @@ interface Previa {
   mapa?: Record<string, { dreGroup: string; name: string }>
   chavesNovas?: string[]
   truncated?: boolean
+  /** Recebimentos já gravados nos meses do arquivo — serão substituídos */
+  substitui?: { year: number; month: number; count: number; total: number }[]
+  /** O arquivo traz a unidade de cada linha (recebíveis mensais por loja) */
+  comUnidade?: boolean
 }
 
 export default function Lancamentos() {
@@ -123,7 +128,7 @@ export default function Lancamentos() {
       body: JSON.stringify(
         previa.kind === 'pagamentos'
           ? { kind: 'pagamentos', rows: previa.rows }
-          : { kind: 'recebimentos', rows: previa.rows, unitId: unitId || null }
+          : { kind: 'recebimentos', rows: previa.rows, unitId: previa.comUnidade ? null : (unitId || null) }
       ),
     })
     const data = await res.json()
@@ -131,7 +136,10 @@ export default function Lancamentos() {
       const novas = data.novasChaves?.length
         ? ` · ${data.novasChaves.length} conta(s) nova(s) em "A Classificar"`
         : ''
-      showToast(`✓ ${data.imported} gravados${data.skipped ? `, ${data.skipped} já existiam` : ''}${novas}`)
+      const substituidos = data.substituidos
+        ? ` · substituíram ${data.substituidos} recebimentos já gravados de ${(data.meses || []).join(', ')}`
+        : ''
+      showToast(`✓ ${data.imported} gravados${data.skipped ? `, ${data.skipped} já existiam` : ''}${novas}${substituidos}`)
       setPrevia(null)
       load()
     } else {
@@ -268,8 +276,9 @@ export default function Lancamentos() {
               <strong>Contas a Pagar</strong> (export do ERP) — cada título já vem com o Plano de Contas,
               então a classificação na DRE é automática. Títulos <em>pagos</em> entram na DRE pela data de
               pagamento; <em>pendentes</em> vão para o fluxo de caixa projetado pela data de vencimento.<br />
-              <strong>Recebidos e Recebíveis</strong> — receita por canal e mês. O que está como
-              “recebido” entra na DRE; “a receber” alimenta o fluxo projetado.
+              <strong>Recebíveis do mês</strong> (export do ERP, por canal e loja) — receita por canal. O que está como
+              “recebido” entra na DRE; “a receber” alimenta o fluxo projetado. Subir o arquivo de um mês
+              <strong> substitui</strong> o que já estava gravado daquele mês — pode reenviar sem duplicar.
             </div>
           </div>
           <div
@@ -319,14 +328,32 @@ export default function Lancamentos() {
                   </div>
                 </div>
               )}
+              {previa.kind === 'recebimentos' && !!previa.substitui?.length && (
+                <div style={{ marginTop: 8, fontSize: 12, background: '#e8f0fe', border: '1px solid #a8c7fa', borderRadius: 6, padding: '8px 12px', color: '#1a5fa8', maxWidth: 620 }}>
+                  <strong>Substitui o que já está gravado.</strong> Os recebimentos destes meses serão trocados pelos do arquivo:
+                  {previa.substitui.map(s => {
+                    const novo = (previa.rows as RecebimentoRow[])
+                      .filter(r => r.month === s.month && r.year === s.year)
+                      .reduce((acc, r) => acc + r.valor, 0)
+                    return (
+                      <div key={s.year * 100 + s.month} style={{ fontSize: 11, marginTop: 3 }}>
+                        • {MONTH_NAMES[s.month]}/{s.year}: {s.count} lançamento{s.count > 1 ? 's' : ''} ({fmt(s.total)}) → {fmt(novo)} no arquivo
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              {previa.kind === 'recebimentos' && (
+              {previa.kind === 'recebimentos' && !previa.comUnidade && (
                 <select className="form-select" style={{ fontSize: 12, width: 180 }} value={unitId} onChange={e => setUnitId(e.target.value)}>
                   <option value="">Sem unidade (consolidado)</option>
                   {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
                   {units.map((u: any) => <option key={u.id} value={u.id}>{u.name}</option>)}
                 </select>
+              )}
+              {previa.kind === 'recebimentos' && previa.comUnidade && (
+                <span style={{ fontSize: 11, color: 'var(--brave-gray)' }}>a loja de cada linha vem do arquivo</span>
               )}
               <button className="btn btn-primary" onClick={salvar} disabled={saving}>
                 {saving ? 'Gravando...' : `Importar ${previa.rows.length} linhas`}
@@ -386,6 +413,7 @@ export default function Lancamentos() {
                 <thead>
                   <tr>
                     <th>Competência</th>
+                    {previa.comUnidade && <th>Loja</th>}
                     <th>Canal</th>
                     <th style={{ textAlign: 'right' }}>Valor</th>
                     <th>Situação</th>
@@ -395,6 +423,11 @@ export default function Lancamentos() {
                   {previaRec.map(t => (
                     <tr key={t.fitid}>
                       <td style={{ whiteSpace: 'nowrap', fontSize: 12 }}>{MONTH_NAMES[t.month]}/{t.year}</td>
+                      {previa.comUnidade && (
+                        <td style={{ fontSize: 12, color: 'var(--brave-gray-mid)' }}>
+                          {(t.unidade || '—').replace(/^FARMA\s*&\s*FARMA\s*-?\s*/i, '')}
+                        </td>
+                      )}
                       <td style={{ fontSize: 13 }}>{t.canal}</td>
                       <td style={{ textAlign: 'right', fontWeight: 600, whiteSpace: 'nowrap', color: '#1a7a4a' }}>{fmt(t.valor)}</td>
                       <td>

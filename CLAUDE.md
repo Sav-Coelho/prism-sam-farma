@@ -49,7 +49,10 @@ Array.from(map.entries()).forEach(([k, v]) => { })
 | `Transaction` | lançamento; `amount` negativo = saída, positivo = entrada |
 
 **Transaction — campos que importam:**
-- `fitid` (unique) — chave anti-duplicata gerada no import (`sf_{arquivo}_{data}_{centavos}_{n}`)
+- `fitid` (unique) — chave anti-duplicata gerada no import. **Pagamentos** ainda embutem o nome
+  do arquivo (`sf_pag_{arquivo}_...`): reimportar o mesmo período com outro nome DUPLICA (incidente
+  de agosto/2026). **Recebimentos** não (`sf_rec_{aaaamm}_{loja}_{canal}_{r|p}`): a gravação
+  substitui o mês inteiro, então reimportar nunca soma.
 - `month` / `year` — **competência contábil**, pode diferir de `date` (import com "tudo no mês X")
 - `accountId` null = não classificado → **fora da DRE**
 - `status` — REALIZADO (entra na DRE) ou PENDENTE (só fluxo projetado)
@@ -68,6 +71,7 @@ Array.from(map.entries()).forEach(([k, v]) => { })
 | `/fluxo-projetado` | Entradas e saídas previstas por mês de vencimento, saldo acumulado, vencidos |
 | `/plano-de-contas` | De-Para: conta do ERP → categoria da DRE, filtro "só a classificar" |
 | `/unidades` | CRUD de unidades e contas bancárias |
+| `/estoque` | Estoque & Compras: margem e reposição por produto, painel por loja, sugestão de compra |
 
 ## API
 
@@ -85,6 +89,9 @@ Array.from(map.entries()).forEach(([k, v]) => { })
 | `POST /api/accounts/import` | Excel/CSV → plano de contas |
 | `GET/POST /api/units`, `PUT/DELETE /api/units/[id]` | unidades |
 | `POST /api/bank-accounts`, `PUT/DELETE /api/bank-accounts/[id]` | contas bancárias |
+| `GET /api/estoque?unitId&situacao&abc&q&sort` | painel + produtos calculados (cap 500) |
+| `POST /api/estoque/import` | multipart (file, unitId, dry?) — grava com substituição |
+| `GET/PUT /api/estoque/params` | parâmetros do motor (StockSettings, linha única) |
 
 ## Fluxo de import (`/lancamentos`)
 
@@ -95,17 +102,53 @@ O analista sobe dois arquivos; `POST /api/import/parse` reconhece qual é pelo c
    Cada título usa a coluna "Valor" (é a que a DRE do cliente soma, **não** "Valor Documento").
    `Status = Paga` + Data Pagamento → `status REALIZADO`, competência = data de pagamento.
    Caso contrário → `PENDENTE`, competência = vencimento (só fluxo projetado).
-2. **Recebidos e Recebíveis** — `parseRecebimentos()`. Aceita o formato normalizado
-   (Competência · Canal · Valor) e a matriz em blocos ("Contas a receber Agosto" com colunas
-   recebidos/a receber). Cada bloco tem a janela de colunas limitada pelo bloco seguinte.
+2. **Recebíveis do mês** — `parseRecebimentos()`. O arquivo que o analista sobe todo mês
+   (ex.: `RecebiveisAgosto2026.xlsx`) vem **sem cabeçalho**, uma linha por canal × loja:
+   `Ano · Mês · AAAAMM · Canal · Valor · Unidade` — e traz a **loja**, então a receita desses
+   meses entra com `unitId` (DRE por loja real, sem rateio). O export vem "formatado" até a linha
+   99.935 sem dado nenhum: `readSheetMatrix(..., maxRows = 50000)` protege a memória. Os dois
+   formatos antigos continuam aceitos: normalizado (Competência · Canal · Valor) e matriz em blocos
+   ("Contas a receber Agosto" com colunas recebidos/a receber).
 3. Qualquer outra planilha cai no fluxo genérico (`src/lib/import-mapper.ts`, mapeamento manual).
 
 `POST /api/import` grava. `src/lib/erp-sync.ts` resolve os cadastros: chave do ERP → conta
 (criando como `⚠ A Classificar` quando nova), apelido da unidade → `Unit`, canal → conta de receita.
+Recebimentos passam por `gravarRecebimentos()`: apaga os `sf_rec_*` dos meses presentes no
+arquivo e regrava — a prévia em `/lancamentos` avisa o que vai ser substituído.
+Carga por script: `scripts/carregar-recebiveis.ts` (mesmo caminho da tela; `maxRows` menor em
+máquina com pouca RAM).
 
 **Datas:** o export do ERP vem em DD/MM/AAAA, mas a aba `Base_Pagamentos` do arquivo da DRE vem
 em **M/D/AA** — o `scripts/backfill.ts` normaliza antes de parsear. Confirmado por 3.412 datas com
 o segundo componente > 12 e pelo total de julho batendo com a planilha.
+
+## Estoque & Compras (`/estoque`)
+
+Réplica da ferramenta de margem e reposição da Brave (planilha "BRAVE · Painel — Sam Farma"),
+alimentada pelos 3 relatórios que o ERP exporta **por loja**: Estoque, Vendas por item e
+Diário de vendas. `sniffEstoqueKind` (em `src/lib/estoque-import.ts`) reconhece qual é.
+
+**Gravação com SUBSTITUIÇÃO** (`src/lib/estoque-sync.ts`) — reimportar nunca soma:
+Estoque e Vendas apagam o snapshot da unidade e regravam; o Diário substitui só os dias
+presentes no arquivo. Modelos: `Product` (barcode único, normalizado), `StockPosition` e
+`SalesItem` (snapshots por unidade), `DailySale`, `StockSettings` (parâmetros, linha única),
+`StockImport` (rastro).
+
+**Motor** (`src/lib/estoque.ts`) — fórmulas extraídas da planilha e validadas produto a
+produto (`scripts/validar-estoque.ts`: Igarassu, Goiana e Painel, 100%):
+- margem = (faturamento − qtd × custo) / faturamento; custo = estoque, senão o do relatório de vendas
+- MC = margem − % custos variáveis · preço sugerido = custo/(1−meta) · custo-alvo = preço×(1−meta)
+- demanda/dia: vendas ÷ (meses × 30,44); com diário ≥ `minDiasDiario` (30) entra o **modo σ**
+  (nível de serviço z, desvio do diário)
+- estoque mín/máx por dias de cobertura (lead + segurança [+ ciclo]) ou por z·σ no modo σ;
+  sugestão de compra = máx − atual; situação: Repor / OK / Excesso / Sem giro / Sem cadastro
+- Painel filtra não-mercadoria (`categoriasExcluidas`); custo fixo rateado por share de
+  faturamento; PE = custo fixo ÷ MC
+
+**Armadilha real dos relatórios:** código de barras como número vira notação científica na
+leitura formatada ("7.896E+12" colapsou 18 mil SKUs em 469). Por isso o caminho de estoque lê
+com `readSheetMatrix(..., raw = true)` e `normalizarBarcode` só tira zeros à esquerda até 15
+dígitos. Carga inicial: `scripts/backfill-estoque.ts` (uma aba por execução — RAM limitada).
 
 ## Classificador (`src/lib/classifier.ts`)
 

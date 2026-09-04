@@ -10,7 +10,7 @@
  */
 import { prisma } from './prisma'
 import { CAT, typeForGroup } from './dre'
-import { codigoErp, nomeCurtoErp } from './erp-import'
+import { codigoErp, nomeCurtoErp, type RecebimentoRow } from './erp-import'
 
 export interface ResolvidoAccount {
   id: number
@@ -136,4 +136,57 @@ export async function resolverUnidades(
     }
   }
   return mapa
+}
+
+/**
+ * Grava recebimentos com SUBSTITUIÇÃO do mês: tudo que já estava gravado como
+ * recebimento (`fitid` sf_rec_*) nos meses presentes no arquivo é apagado antes.
+ * Reimportar o mesmo mês — com qualquer nome de arquivo — nunca soma.
+ *
+ * Linhas com `unidade` (arquivo mensal por loja) recebem a unidade do ERP;
+ * sem ela, vale a unidade escolhida na tela (ou nenhuma = consolidado).
+ */
+export async function gravarRecebimentos(
+  rows: RecebimentoRow[],
+  unitIdManual: number | null
+): Promise<{ apagados: number; gravados: number; meses: string[] }> {
+  const contas = await resolverContasCanal(rows.map(r => r.canal))
+  const comUnidade = rows.filter(r => r.unidade)
+  const unidades = comUnidade.length > 0
+    ? await resolverUnidades(comUnidade.map(r => ({ apelido: r.unidade!, codigo: r.unidade! })))
+    : {}
+
+  const chaves = Array.from(new Set(rows.map(r => r.year * 100 + r.month))).sort()
+  let apagados = 0
+  for (const ym of chaves) {
+    const r = await prisma.transaction.deleteMany({
+      where: { fitid: { startsWith: 'sf_rec_' }, year: Math.floor(ym / 100), month: ym % 100 },
+    })
+    apagados += r.count
+  }
+
+  const data = rows.map(r => {
+    // Recebimento agregado do mês: data = último dia da competência
+    const fim = new Date(r.year, r.month, 0)
+    return {
+      fitid: r.fitid,
+      date: fim,
+      dueDate: fim,
+      description: r.canal,
+      memo: r.canal + (r.unidade ? ' · ' + r.unidade : '') + ' · ' + (r.status === 'PENDENTE' ? 'a receber' : 'recebido'),
+      amount: Math.abs(r.valor),
+      month: r.month,
+      year: r.year,
+      status: r.status,
+      accountId: contas[r.canal.toLowerCase()] ?? null,
+      unitId: r.unidade ? (unidades[r.unidade] ?? null) : unitIdManual,
+    }
+  })
+  const res = await prisma.transaction.createMany({ data, skipDuplicates: true })
+
+  return {
+    apagados,
+    gravados: res.count,
+    meses: chaves.map(ym => String(ym % 100).padStart(2, '0') + '/' + Math.floor(ym / 100)),
+  }
 }

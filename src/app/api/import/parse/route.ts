@@ -29,7 +29,8 @@ export async function POST(req: NextRequest) {
     }
 
     const buffer = await file.arrayBuffer()
-    const matrix = readSheetMatrix(buffer, file.name)
+    // 50.000 linhas cobrem qualquer export mensal; protege dos arquivos "formatados" até a linha 99.999
+    const matrix = readSheetMatrix(buffer, file.name, false, 50000)
     if (matrix.length === 0) return NextResponse.json({ error: 'Planilha vazia' }, { status: 422 })
 
     const kind = sniffKind(matrix)
@@ -67,6 +68,18 @@ export async function POST(req: NextRequest) {
       if (r.rows.length === 0) {
         return NextResponse.json({ error: r.errors[0] || 'Nenhum recebimento encontrado' }, { status: 422 })
       }
+      // O que já está gravado nesses meses — a gravação substitui, e a prévia avisa
+      const meses = Array.from(new Set(r.rows.map(x => x.year * 100 + x.month))).sort()
+      const substitui: { year: number; month: number; count: number; total: number }[] = []
+      for (const ym of meses) {
+        const year = Math.floor(ym / 100), month = ym % 100
+        const ag = await prisma.transaction.aggregate({
+          where: { fitid: { startsWith: 'sf_rec_' }, year, month },
+          _count: true,
+          _sum: { amount: true },
+        })
+        if (ag._count > 0) substitui.push({ year, month, count: ag._count, total: ag._sum.amount ?? 0 })
+      }
       return NextResponse.json({
         kind,
         fileName: file.name,
@@ -74,6 +87,8 @@ export async function POST(req: NextRequest) {
         errors: r.errors.slice(0, 50),
         totalRealizado: r.totalRealizado,
         totalPendente: r.totalPendente,
+        substitui,
+        comUnidade: r.rows.some(x => !!x.unidade),
       })
     }
 
